@@ -9,8 +9,9 @@ from microcontroller import watchdog as w
 from watchdog import WatchDogMode
 
 # Configure Watchdog
-w.timeout=11 # Set a timeout of 11 seconds
-w.mode = WatchDogMode.RAISE
+w.mode = WatchDogMode.RESET
+w.timeout=5 # Set a timeout of 5 seconds
+w.feed()
 
 # APRS encoder
 aprs = APRS()
@@ -95,6 +96,6 @@ while True:
             print(message)
             rfm9x.send(bytes("{}".format(message), "UTF-8"))
             w.feed()
-            time.sleep(10)
+            time.sleep(4)
             print("done sending!")
         w.feed()
