@@ -5,6 +5,12 @@ import adafruit_gps
 import digitalio
 import adafruit_rfm9x
 from APRS import APRS
+from microcontroller import watchdog as w
+from watchdog import WatchDogMode
+
+# Configure Watchdog
+w.timeout=11 # Set a timeout of 11 seconds
+w.mode = WatchDogMode.RAISE
 
 # APRS encoder
 aprs = APRS()
@@ -41,6 +47,7 @@ while True:
         if not gps.has_fix:
             # Try again if we don't have a fix yet.
             print("Waiting for fix...")
+            w.feed()
             continue
         # We have a fix! (gps.has_fix is true)
         # Print out details about the fix like location, date, etc.a
@@ -87,5 +94,7 @@ while True:
             message = "{}>APLORA,WIDE1-1:@{}{}{}".format(callsign, ts, pos, comment)
             print(message)
             rfm9x.send(bytes("{}".format(message), "UTF-8"))
+            w.feed()
             time.sleep(10)
             print("done sending!")
+        w.feed()
