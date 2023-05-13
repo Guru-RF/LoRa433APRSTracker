@@ -23,7 +23,7 @@ RESET = digitalio.DigitalInOut(board.GP20)
 spi = busio.SPI(board.GP18, MOSI=board.GP19, MISO=board.GP16)
 
 rfm9x = adafruit_rfm9x.RFM9x(spi, CS, RESET, RADIO_FREQ_MHZ, baudrate=1000000)
-rfm9x.tx_power = 5
+rfm9x.tx_power = 23 # max
 rfm9x.signal_bandwidth = 125000
 rfm9x.coding_rate = 5
 rfm9x.spreading_factor = 7
