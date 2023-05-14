@@ -5,13 +5,27 @@ import adafruit_gps
 import digitalio
 import adafruit_rfm9x
 from APRS import APRS
-from microcontroller import watchdog as w
-from watchdog import WatchDogMode
+import supervisor
+
+#from microcontroller import watchdog as w
+#from watchdog import WatchDogMode
 
 # Configure Watchdog
-w.mode = WatchDogMode.RESET
-w.timeout=5 # Set a timeout of 5 seconds
-w.feed()
+#w.mode = WatchDogMode.RESET
+#w.timeout=5 # Set a timeout of 5 seconds
+#w.feed()
+
+# Reset GPS
+gpsRST = digitalio.DigitalInOut(board.GP12)
+gpsRST.direction = digitalio.Direction.OUTPUT
+gpsRST.value = False
+print("reseting gps!")
+time.sleep(2)
+gpsRST.value = True
+time.sleep(2)
+print("gps init!")
+#w.feed()
+
 
 # APRS encoder
 aprs = APRS()
@@ -30,18 +44,12 @@ rfm9x.spreading_factor = 7
 
 #rfm9x.send(bytes("message number {}".format(counter), "UTF-8"))
 
-gpsRST = digitalio.DigitalInOut(board.GP12)
-gpsRST.direction = digitalio.Direction.OUTPUT
-gpsRST.value = True
-time.sleep(0.3)
-gpsRST.value = False
-print("gps reset!")
 
 uart = busio.UART(board.GP4, board.GP5, baudrate=9600, timeout=10)
 
 gps = adafruit_gps.GPS(uart, debug=False)  # Use UART/pyserial
 gps.send_command(b"PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0")
-gps.send_command(b"PMTK220,5000")
+gps.send_command(b"PMTK220,1000")
 
 # configure LEDs
 pwrLED = digitalio.DigitalInOut(board.GP9)
@@ -61,8 +69,20 @@ last_lat = None
 last_lon = None
 gps_blink = False
 gps_lock = False
+lora_blink = False
 while True:
-    gps.update()
+    try:
+        gps.update()
+    except MemoryError:
+        supervisor.reload()
+
+    if gps_lock is True:
+        if lora_blink is True:
+            loraLED.value = True
+            lora_blink = False
+        else:
+            time.sleep(0.3)
+            loraLED.value = False
     if gps_lock is False:
         if gps_blink is True:
             gpsLED.value = True
@@ -77,18 +97,21 @@ while True:
         if not gps.has_fix:
             gps_lock = False
             # Try again if we don't have a fix yet.
-            print("Waiting for fix...")
+            #print("Waiting for fix...")
             if gps_blink is False:
                 gps_blink = True
-            w.feed()
+            #w.feed()
             continue
         gps_lock = True
         gpsLED.value = True
+        if lora_blink is False:
+            lora_blink = True
+        #w.feed()
         # We have a fix! (gps.has_fix is true)
         # Print out details about the fix like location, date, etc.a
-        w.feed()
+        #w.feed()
         if last_lat is not gps.latitude and last_lon is not gps.longitude:
-            print("Moved!")
+            #print("Moved!")
             last_lat = gps.latitude
             last_lon = gps.longitude
             print("=" * 40)  # Print a separator line.
@@ -130,14 +153,11 @@ while True:
             message = "{}>APLORA,WIDE1-1:@{}{}{}".format(callsign, ts, pos, comment)
             print(message)
             loraLED.value = True
-            w.feed()
+            #w.feed()
             rfm9x.send(bytes("{}".format(message), "UTF-8"))
+            time.sleep(10)
             loraLED.value = False
-            w.feed()
+            #w.feed()
             print("done sending!")
-            gpsRST.value = True
-            time.sleep(0.3)
-            gpsRST.value = False
-            print("gps reset!")
-        else:
-            print(str(gps.timestamp_utc.tm_sec) + " not moved!")
+        #else:
+            #print(str(gps.timestamp_utc.tm_sec) + " not moved!")
