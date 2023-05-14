@@ -45,11 +45,14 @@ rfm9x.spreading_factor = 7
 #rfm9x.send(bytes("message number {}".format(counter), "UTF-8"))
 
 
-uart = busio.UART(board.GP4, board.GP5, baudrate=9600, timeout=10)
+uart = busio.UART(board.GP4, board.GP5, baudrate=9600, timeout=60)
 
 gps = adafruit_gps.GPS(uart, debug=False)  # Use UART/pyserial
-gps.send_command(b"PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0")
-gps.send_command(b"PMTK220,1000")
+# Turn on the basic GGA and RMC info (what you typically want)
+#gps.send_command(b"PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0")
+# Turn on just minimum info (RMC only, location):
+gps.send_command(b'PMTK314,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0')
+gps.send_command(b"PMTK220,2500")
 
 # configure LEDs
 pwrLED = digitalio.DigitalInOut(board.GP9)
@@ -73,6 +76,7 @@ lora_blink = False
 while True:
     try:
         gps.update()
+        current = time.monotonic()
     except MemoryError:
         supervisor.reload()
 
@@ -91,8 +95,7 @@ while True:
             time.sleep(0.3)
             gpsLED.value = False
     # Every second print out current location details if there's a fix.
-    current = time.monotonic()
-    if current - last_print >= 1.0:
+    if current - last_print >= 2.5:
         last_print = current
         if not gps.has_fix:
             gps_lock = False
