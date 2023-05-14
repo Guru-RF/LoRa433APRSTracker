@@ -7,13 +7,13 @@ import adafruit_rfm9x
 from APRS import APRS
 import supervisor
 
-#from microcontroller import watchdog as w
-#from watchdog import WatchDogMode
+from microcontroller import watchdog as w
+from watchdog import WatchDogMode
 
 # Configure Watchdog
-#w.mode = WatchDogMode.RESET
-#w.timeout=5 # Set a timeout of 5 seconds
-#w.feed()
+w.mode = WatchDogMode.RESET
+w.timeout=5 # Set a timeout of 5 seconds
+w.feed()
 
 
 # configure LEDs
@@ -35,8 +35,11 @@ gpsRST.direction = digitalio.Direction.OUTPUT
 gpsRST.value = False
 print("reseting gps!")
 time.sleep(2)
+w.feed()
 gpsRST.value = True
 time.sleep(2)
+w.feed()
+
 print("gps init!")
 #w.feed()
 
@@ -57,14 +60,15 @@ rfm9x.spreading_factor = 7
 
 #rfm9x.send(bytes("message number {}".format(counter), "UTF-8"))
 
-uart = busio.UART(board.GP4, board.GP5, baudrate=9600, timeout=25)
+uart = busio.UART(board.GP4, board.GP5, baudrate=9600, timeout=10)
 
-gps = adafruit_gps.GPS(uart, debug=False)  # Use UART/pyserial
+gps = adafruit_gps.GPS(uart, debug=True)  # Use UART/pyserial
+
 # Turn on the basic GGA and RMC info (what you typically want)
 gps.send_command(b"PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0")
 # Turn on just minimum info (RMC only, location):
 #gps.send_command(b'PMTK314,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0')
-gps.send_command(b"PMTK220,2500")
+gps.send_command(b"PMTK220,5000")
 
 last_print = time.monotonic()
 last_lat = None
@@ -73,6 +77,7 @@ gps_blink = False
 gps_lock = False
 lora_blink = False
 while True:
+    w.feed()
     try:
         gps.update()
     except MemoryError:
@@ -95,7 +100,7 @@ while True:
             gpsLED.value = False
     # Every second print out current location details if there's a fix.
     current = time.monotonic()
-    if current - last_print >= 2.5:
+    if current - last_print >= 5:
         last_print = current
         if not gps.has_fix:
             gps_lock = False
@@ -103,13 +108,13 @@ while True:
             #print("Waiting for fix...")
             if gps_blink is False:
                 gps_blink = True
-            #w.feed()
+            w.feed()
             continue
         gps_lock = True
         gpsLED.value = True
         if lora_blink is False:
             lora_blink = True
-        #w.feed()
+        w.feed()
         # We have a fix! (gps.has_fix is true)
         # Print out details about the fix like location, date, etc.a
         #w.feed()
@@ -156,11 +161,9 @@ while True:
             message = "{}>APLORA,WIDE1-1:@{}{}{}".format(callsign, ts, pos, comment)
             print(message)
             loraLED.value = True
-            #w.feed()
             rfm9x.send(bytes("{}".format(message), "UTF-8"))
-            time.sleep(10)
+            #time.sleep(10)
             loraLED.value = False
-            #w.feed()
             print("done sending!")
         #else:
             #print(str(gps.timestamp_utc.tm_sec) + " not moved!")
