@@ -30,28 +30,63 @@ rfm9x.spreading_factor = 7
 
 #rfm9x.send(bytes("message number {}".format(counter), "UTF-8"))
 
+gpsRST = digitalio.DigitalInOut(board.GP12)
+gpsRST.direction = digitalio.Direction.OUTPUT
+gpsRST.value = True
+time.sleep(0.3)
+gpsRST.value = False
+print("gps reset!")
+
 uart = busio.UART(board.GP4, board.GP5, baudrate=9600, timeout=10)
 
 gps = adafruit_gps.GPS(uart, debug=False)  # Use UART/pyserial
 gps.send_command(b"PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0")
-gps.send_command(b"PMTK220,1000")
+gps.send_command(b"PMTK220,5000")
+
+# configure LEDs
+pwrLED = digitalio.DigitalInOut(board.GP9)
+pwrLED.direction = digitalio.Direction.OUTPUT
+pwrLED.value = True
+
+gpsLED = digitalio.DigitalInOut(board.GP10)
+gpsLED.direction = digitalio.Direction.OUTPUT
+gpsLED.value = False
+
+loraLED = digitalio.DigitalInOut(board.GP11)
+loraLED.direction = digitalio.Direction.OUTPUT
+loraLED.value = False
 
 last_print = time.monotonic()
 last_lat = None
 last_lon = None
+gps_blink = False
+gps_lock = False
 while True:
     gps.update()
+    if gps_lock is False:
+        if gps_blink is True:
+            gpsLED.value = True
+            gps_blink = False
+        else:
+            time.sleep(0.3)
+            gpsLED.value = False
     # Every second print out current location details if there's a fix.
     current = time.monotonic()
     if current - last_print >= 1.0:
         last_print = current
         if not gps.has_fix:
+            gps_lock = False
             # Try again if we don't have a fix yet.
             print("Waiting for fix...")
+            if gps_blink is False:
+                gps_blink = True
             w.feed()
             continue
+        gps_lock = True
+        gpsLED.value = True
         # We have a fix! (gps.has_fix is true)
         # Print out details about the fix like location, date, etc.a
+        w.feed()
         if last_lat is not gps.latitude and last_lon is not gps.longitude:
             print("Moved!")
             last_lat = gps.latitude
@@ -94,8 +129,15 @@ while True:
             #DJ0ABR-7>APLT00,WIDE1-1:!4849.27N/01307.72E[/A=001421LoRa Tracker
             message = "{}>APLORA,WIDE1-1:@{}{}{}".format(callsign, ts, pos, comment)
             print(message)
-            rfm9x.send(bytes("{}".format(message), "UTF-8"))
+            loraLED.value = True
             w.feed()
-            time.sleep(4)
+            rfm9x.send(bytes("{}".format(message), "UTF-8"))
+            loraLED.value = False
+            w.feed()
             print("done sending!")
-        w.feed()
+            gpsRST.value = True
+            time.sleep(0.3)
+            gpsRST.value = False
+            print("gps reset!")
+        else:
+            print(str(gps.timestamp_utc.tm_sec) + " not moved!")
