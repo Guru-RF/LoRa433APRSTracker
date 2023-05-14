@@ -15,6 +15,20 @@ import supervisor
 #w.timeout=5 # Set a timeout of 5 seconds
 #w.feed()
 
+
+# configure LEDs
+pwrLED = digitalio.DigitalInOut(board.GP9)
+pwrLED.direction = digitalio.Direction.OUTPUT
+pwrLED.value = True
+
+gpsLED = digitalio.DigitalInOut(board.GP10)
+gpsLED.direction = digitalio.Direction.OUTPUT
+gpsLED.value = False
+
+loraLED = digitalio.DigitalInOut(board.GP11)
+loraLED.direction = digitalio.Direction.OUTPUT
+loraLED.value = False
+
 # Reset GPS
 gpsRST = digitalio.DigitalInOut(board.GP12)
 gpsRST.direction = digitalio.Direction.OUTPUT
@@ -25,7 +39,6 @@ gpsRST.value = True
 time.sleep(2)
 print("gps init!")
 #w.feed()
-
 
 # APRS encoder
 aprs = APRS()
@@ -44,28 +57,14 @@ rfm9x.spreading_factor = 7
 
 #rfm9x.send(bytes("message number {}".format(counter), "UTF-8"))
 
-
-uart = busio.UART(board.GP4, board.GP5, baudrate=9600, timeout=60)
+uart = busio.UART(board.GP4, board.GP5, baudrate=9600, timeout=25)
 
 gps = adafruit_gps.GPS(uart, debug=False)  # Use UART/pyserial
 # Turn on the basic GGA and RMC info (what you typically want)
-#gps.send_command(b"PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0")
+gps.send_command(b"PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0")
 # Turn on just minimum info (RMC only, location):
-gps.send_command(b'PMTK314,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0')
+#gps.send_command(b'PMTK314,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0')
 gps.send_command(b"PMTK220,2500")
-
-# configure LEDs
-pwrLED = digitalio.DigitalInOut(board.GP9)
-pwrLED.direction = digitalio.Direction.OUTPUT
-pwrLED.value = True
-
-gpsLED = digitalio.DigitalInOut(board.GP10)
-gpsLED.direction = digitalio.Direction.OUTPUT
-gpsLED.value = False
-
-loraLED = digitalio.DigitalInOut(board.GP11)
-loraLED.direction = digitalio.Direction.OUTPUT
-loraLED.value = False
 
 last_print = time.monotonic()
 last_lat = None
@@ -76,25 +75,26 @@ lora_blink = False
 while True:
     try:
         gps.update()
-        current = time.monotonic()
     except MemoryError:
         supervisor.reload()
+    time.sleep(1)
 
     if gps_lock is True:
         if lora_blink is True:
             loraLED.value = True
             lora_blink = False
         else:
-            time.sleep(0.3)
+            #time.sleep(0.3)
             loraLED.value = False
     if gps_lock is False:
         if gps_blink is True:
             gpsLED.value = True
             gps_blink = False
         else:
-            time.sleep(0.3)
+            #time.sleep(0.3)
             gpsLED.value = False
     # Every second print out current location details if there's a fix.
+    current = time.monotonic()
     if current - last_print >= 2.5:
         last_print = current
         if not gps.has_fix:
