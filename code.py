@@ -65,10 +65,10 @@ uart = busio.UART(board.GP4, board.GP5, baudrate=9600, timeout=10)
 gps = adafruit_gps.GPS(uart, debug=True)  # Use UART/pyserial
 
 # Turn on the basic GGA and RMC info (what you typically want)
-gps.send_command(b"PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0")
+#gps.send_command(b"PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0")
 # Turn on just minimum info (RMC only, location):
 #gps.send_command(b'PMTK314,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0')
-gps.send_command(b"PMTK220,5000")
+#gps.send_command(b"PMTK220,5000")
 
 last_print = time.monotonic()
 last_lat = None
