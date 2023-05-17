@@ -53,35 +53,11 @@ RESET = digitalio.DigitalInOut(board.GP20)
 spi = busio.SPI(board.GP18, MOSI=board.GP19, MISO=board.GP16)
 
 rfm9x = adafruit_rfm9x.RFM9x(spi, CS, RESET, RADIO_FREQ_MHZ, baudrate=1000000)
-
-rfm9x.high_power = True
-rfm9x.tx_power = 23 # max
-
-#rfm95 compat
-rfm9x.preamble_length = 8
-
-rfm9x.signal_bandwidth = 125000
-rfm9x.coding_rate = 5
-rfm9x.spreading_factor = 12
-rfm9x.enable_crc = True
-rfm9x.xmit_timeout = 60
-symbolDuration = 1000 / ( rfm9x.signal_bandwidth / (1 << rfm9x.spreading_factor) )
-if symbolDuration > 16:
-        rfm9x.low_datarate_optimize = 1
-        print("low datarate on")
-else:
-        rfm9x.low_datarate_optimize = 0
-        print("low datarate off")
+rfm9x.tx_power = 23 # 5 min 23 max
 
 uart = busio.UART(board.GP4, board.GP5, baudrate=9600, timeout=10)
 
 gps = adafruit_gps.GPS(uart, debug=True)  # Use UART/pyserial
-
-# Turn on the basic GGA and RMC info (what you typically want)
-#gps.send_command(b"PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0")
-# Turn on just minimum info (RMC only, location):
-#gps.send_command(b'PMTK314,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0')
-#gps.send_command(b"PMTK220,5000")
 
 last_print = time.monotonic()
 last_lat = None
@@ -170,7 +146,6 @@ while True:
             ts = aprs.makeTimestamp('h',gps.timestamp_utc.tm_hour,gps.timestamp_utc.tm_min,gps.timestamp_utc.tm_sec)
             pos = aprs.makePosition(gps.latitude,gps.longitude,-1,-1,-1,type)
 
-            #DJ0ABR-7>APLT00,WIDE1-1:!4849.27N/01307.72E[/A=001421LoRa Tracker
             message = "{}>APLT00,WIDE1-1:@{}{}{}".format(callsign, ts, pos, comment)
             print(message)
             loraLED.value = True
