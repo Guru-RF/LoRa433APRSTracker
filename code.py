@@ -4,6 +4,7 @@ import busio
 import adafruit_gps
 import digitalio
 import adafruit_rfm9x
+import binascii
 from APRS import APRS
 import supervisor
 
@@ -34,10 +35,9 @@ gpsRST = digitalio.DigitalInOut(board.GP12)
 gpsRST.direction = digitalio.Direction.OUTPUT
 gpsRST.value = False
 print("reseting gps!")
-time.sleep(2)
+time.sleep(0.3)
 w.feed()
 gpsRST.value = True
-time.sleep(2)
 w.feed()
 
 print("gps init!")
@@ -53,12 +53,25 @@ RESET = digitalio.DigitalInOut(board.GP20)
 spi = busio.SPI(board.GP18, MOSI=board.GP19, MISO=board.GP16)
 
 rfm9x = adafruit_rfm9x.RFM9x(spi, CS, RESET, RADIO_FREQ_MHZ, baudrate=1000000)
+
+rfm9x.high_power = True
 rfm9x.tx_power = 23 # max
+
+#rfm95 compat
+rfm9x.preamble_length = 8
+
 rfm9x.signal_bandwidth = 125000
 rfm9x.coding_rate = 5
-rfm9x.spreading_factor = 7
-
-#rfm9x.send(bytes("message number {}".format(counter), "UTF-8"))
+rfm9x.spreading_factor = 12
+rfm9x.enable_crc = True
+rfm9x.xmit_timeout = 60
+symbolDuration = 1000 / ( rfm9x.signal_bandwidth / (1 << rfm9x.spreading_factor) )
+if symbolDuration > 16:
+        rfm9x.low_datarate_optimize = 1
+        print("low datarate on")
+else:
+        rfm9x.low_datarate_optimize = 0
+        print("low datarate off")
 
 uart = busio.UART(board.GP4, board.GP5, baudrate=9600, timeout=10)
 
@@ -152,17 +165,22 @@ while True:
                 print("Height geo ID: {} meters".format(gps.height_geoid))
 
             callsign = "ON3URE-11"
-            type = '/j'
-            comment = "LoRa APRS RF.Guru"
+            type = '/k'
+            comment = "RF.Guru"
             ts = aprs.makeTimestamp('h',gps.timestamp_utc.tm_hour,gps.timestamp_utc.tm_min,gps.timestamp_utc.tm_sec)
             pos = aprs.makePosition(gps.latitude,gps.longitude,-1,-1,-1,type)
 
             #DJ0ABR-7>APLT00,WIDE1-1:!4849.27N/01307.72E[/A=001421LoRa Tracker
-            message = "{}>APLORA,WIDE1-1:@{}{}{}".format(callsign, ts, pos, comment)
+            message = "{}>APLT00,WIDE1-1:@{}{}{}".format(callsign, ts, pos, comment)
             print(message)
             loraLED.value = True
-            rfm9x.send(bytes("{}".format(message), "UTF-8"))
-            #time.sleep(10)
+	    print(rfm9x.send(
+                bytes("{}".format("<"), "UTF-8") + binascii.unhexlify("FF") + binascii.unhexlify("01") +
+                bytes("{}".format(message), "UTF-8")
+	    ))
+            w.feed()
+	    time.sleep(3)
+            w.feed()
             loraLED.value = False
             print("done sending!")
         #else:
