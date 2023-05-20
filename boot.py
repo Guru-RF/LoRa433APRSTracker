@@ -1,11 +1,19 @@
 import usb_cdc
 import board
 import storage
-from digitalio import DigitalInOut, Direction, Pull
+import time
+import digitalio
 
-btn = DigitalInOut(board.GP15)
-btn.direction = Direction.INPUT
-btn.pull = Pull.UP
+# init gps
+gpsRST = digitalio.DigitalInOut(board.GP12)
+gpsRST.direction = digitalio.Direction.OUTPUT
+gpsRST.value = False
+time.sleep(0.1)
+gpsRST.value = True
+
+btn = digitalio.DigitalInOut(board.GP15)
+btn.direction = digitalio.Direction.INPUT
+btn.pull = digitalio.Pull.UP
 
 # Disable devices only if dah/dit is not pressed.
 if btn.value is True:
@@ -13,7 +21,7 @@ if btn.value is True:
     storage.disable_usb_drive()
     storage.remount("/", readonly=False)
 
-    usb_cdc.enable(console=True, data=False)
+    usb_cdc.enable(console=False, data=False)
 else:
     print(f"boot: button pressed, enable console, enabling drive")
 
