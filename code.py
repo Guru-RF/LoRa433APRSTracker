@@ -80,6 +80,7 @@ last_lon = None
 gps_blink = False
 gps_lock = False
 lora_blink = False
+elapsed = 0
 while True:
     w.feed()
     try:
@@ -118,7 +119,9 @@ while True:
             lora_blink = True
         # We have a fix! (gps.has_fix is true)
         # Print out details about the fix like location, date, etc.a
-        if last_lat is not gps.latitude and last_lon is not gps.longitude:
+        elapsed=elapsed+1
+        if last_lat is not gps.latitude and last_lon is not gps.longitude and elapsed is not 1500:
+            elapsed = 0
             last_lat = gps.latitude
             last_lon = gps.longitude
 
