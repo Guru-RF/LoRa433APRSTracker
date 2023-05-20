@@ -134,7 +134,7 @@ while True:
                 bytes("{}".format("<"), "UTF-8") + binascii.unhexlify("FF") + binascii.unhexlify("01") +
                 bytes("{}".format(message), "UTF-8")
             )
-            gps.update()
             loraLED.value = False
+            gps = adafruit_gps.GPS(uart, debug=False) 
         w.feed()
         time.sleep(0.1)
