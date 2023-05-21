@@ -1,3 +1,3 @@
 callsign = "ON3URE-11"
-type = '/k'
+symbol = '/k'
 comment = "RF.Guru"
