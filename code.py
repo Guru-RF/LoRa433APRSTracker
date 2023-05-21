@@ -128,7 +128,12 @@ while True:
             last_lon = gps.longitude
 
             ts = aprs.makeTimestamp('h',gps.timestamp_utc.tm_hour,gps.timestamp_utc.tm_min,gps.timestamp_utc.tm_sec)
-            pos = aprs.makePosition(gps.latitude,gps.longitude,-1,-1,-1,config.symbol)
+
+            angle = -1
+            if gps.track_angle_deg is not None:
+                angle = gps.track_angle_deg
+
+            pos = aprs.makePosition(gps.latitude,gps.longitude,gps.speed_knots,angle,gps.altitude_m,config.symbol)
 
             message = "{}>APRS:@{}{}{}".format(config.callsign, ts, pos, config.comment)
             loraLED.value = True
