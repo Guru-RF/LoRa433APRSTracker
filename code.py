@@ -7,9 +7,9 @@ import adafruit_rfm9x
 import binascii
 from APRS import APRS
 import supervisor
-
 from microcontroller import watchdog as w
 from watchdog import WatchDogMode
+import config
 
 # Configure Watchdog
 w.mode = WatchDogMode.RESET
@@ -38,21 +38,23 @@ CS = digitalio.DigitalInOut(board.GP21)
 RESET = digitalio.DigitalInOut(board.GP20)
 spi = busio.SPI(board.GP18, MOSI=board.GP19, MISO=board.GP16)
 
+# Lora Module
 rfm9x = adafruit_rfm9x.RFM9x(spi, CS, RESET, RADIO_FREQ_MHZ, baudrate=1000000)
 rfm9x.tx_power = 23 # 5 min 23 max
 
+# GPS Module (uart)
 uart = busio.UART(board.GP4, board.GP5, baudrate=9600, timeout=10, receiver_buffer_size=1024)
-
 gps = adafruit_gps.GPS(uart, debug=False) 
 
+# Set GPS speed to 1HZ
 Speed = bytes ([
         0xB5,0x62,0x06,0x08,0x06,0x00,0xE8,0x03,0x01,0x00,0x01,0x00,0x01,0x39 #1Hz
         #0xB5, 0x62, 0x06, 0x08, 0x06, 0x00, 0xC8, 0x00, 0x01, 0x00, 0x01, 0x00, 0xDE, 0x6A 5hz
 ])
 gps.send_command(Speed)
-
 time.sleep(0.1)
 
+# Disable al other GPS data
 Disable_NMEA = bytes ([
         0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0xF0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x24, # GxGGA
         0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0xF0, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x2B, # GxGLL
@@ -62,18 +64,18 @@ Disable_NMEA = bytes ([
         0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0xF0, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x05, 0x47, # GxVTG
         ])
 gps.send_command(Disable_NMEA)
-
 time.sleep(0.1)
 
+# Disable UBX data
 Disable_UBX = bytes ([
         0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x12, 0xB9, #NAV-POSLLH
         0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0x01, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x13, 0xC0, #NAV-STATUS
         0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0x01, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x13, 0xC0, #NAV-STATUS
 ])
 gps.send_command(Disable_UBX)
-
 time.sleep(0.1)
 
+# Start Tracking
 last_print = time.monotonic()
 last_lat = None
 last_lon = None
@@ -86,6 +88,7 @@ while True:
     try:
         gps.update()
     except MemoryError:
+        # the gps module has a nasty memory leak just ignore and reload (Gps trackings stays in tact)
         supervisor.reload()
 
     if gps_lock is True:
@@ -102,7 +105,7 @@ while True:
         else:
             time.sleep(0.1)
             gpsLED.value = False
-    # Every second print out current location details if there's a fix.
+
     current = time.monotonic()
     if current - last_print >= 5:
         last_print = current
@@ -117,21 +120,17 @@ while True:
         gpsLED.value = True
         if lora_blink is False:
             lora_blink = True
-        # We have a fix! (gps.has_fix is true)
-        # Print out details about the fix like location, date, etc.a
+        # We have a fix!
         elapsed=elapsed+1
         if last_lat is not gps.latitude and last_lon is not gps.longitude and elapsed is not 1500:
             elapsed = 0
             last_lat = gps.latitude
             last_lon = gps.longitude
 
-            callsign = "ON3URE-11"
-            type = '/k'
-            comment = "RF.Guru"
             ts = aprs.makeTimestamp('h',gps.timestamp_utc.tm_hour,gps.timestamp_utc.tm_min,gps.timestamp_utc.tm_sec)
-            pos = aprs.makePosition(gps.latitude,gps.longitude,-1,-1,-1,type)
+            pos = aprs.makePosition(gps.latitude,gps.longitude,-1,-1,-1,config.symbol)
 
-            message = "{}>APRS:@{}{}{}".format(callsign, ts, pos, comment)
+            message = "{}>APRS:@{}{}{}".format(config.callsign, ts, pos, config.comment)
             loraLED.value = True
             rfm9x.send(
                 bytes("{}".format("<"), "UTF-8") + binascii.unhexlify("FF") + binascii.unhexlify("01") +
