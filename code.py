@@ -133,7 +133,7 @@ while True:
             if gps.track_angle_deg is not None:
                 angle = gps.track_angle_deg
 
-            pos = aprs.makePosition(gps.latitude,gps.longitude,gps.speed_knots,angle,gps.altitude_m,config.symbol)
+            pos = aprs.makePosition(gps.latitude,gps.longitude,(gps.speed_knots*1.852),angle,gps.altitude_m,config.symbol)
 
             message = "{}>APRS:@{}{}{}".format(config.callsign, ts, pos, config.comment)
             loraLED.value = True
