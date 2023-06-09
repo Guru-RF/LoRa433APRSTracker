@@ -77,8 +77,7 @@ time.sleep(0.1)
 
 # Start Tracking
 last_print = time.monotonic()
-last_lat = None
-last_lon = None
+last_pos = None
 gps_blink = False
 gps_lock = False
 lora_blink = False
@@ -122,18 +121,18 @@ while True:
             lora_blink = True
         # We have a fix!
         elapsed=elapsed+1
-        if last_lat is not gps.latitude and last_lon is not gps.longitude and elapsed is not 1500:
+            
+        angle = -1
+        if gps.track_angle_deg is not None:
+            angle = gps.track_angle_deg
+            
+        pos = aprs.makePosition(gps.latitude,gps.longitude,(gps.speed_knots*1.852),angle,gps.altitude_m,config.symbol)
+
+        if last_pos is not pos and elapsed is config.rate:
+            last_pos = pos
             elapsed = 0
-            last_lat = gps.latitude
-            last_lon = gps.longitude
 
             ts = aprs.makeTimestamp('h',gps.timestamp_utc.tm_hour,gps.timestamp_utc.tm_min,gps.timestamp_utc.tm_sec)
-
-            angle = -1
-            if gps.track_angle_deg is not None:
-                angle = gps.track_angle_deg
-
-            pos = aprs.makePosition(gps.latitude,gps.longitude,(gps.speed_knots*1.852),angle,gps.altitude_m,config.symbol)
 
             message = "{}>APRS:@{}{}{}".format(config.callsign, ts, pos, config.comment)
             loraLED.value = True

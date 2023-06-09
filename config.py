@@ -1,9 +1,10 @@
-callsign = "ON3URE-8"
+callsign = "ON3URE-11"
 #symbol = '/b' # bike
 #symbol = '/>' # car
 #symbol = '/k' # truck
-#symbol = '/j' # truck
+symbol = '/j' # truck
 #symbol = '/v' # truck
 #symbol = '/u' # 18 wheeler
 #symbol = '/U' # bus
 comment = "https://RF.Guru"
+rate = 5000 # milliseconds
