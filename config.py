@@ -7,4 +7,4 @@ symbol = '/j' # truck
 #symbol = '/u' # 18 wheeler
 #symbol = '/U' # bus
 comment = "https://RF.Guru"
-rate = 5000 # milliseconds
+rate = 5 # seconds

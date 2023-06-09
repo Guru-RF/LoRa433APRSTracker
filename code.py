@@ -80,7 +80,6 @@ last_print = time.monotonic()
 last_pos = None
 gps_blink = False
 gps_lock = False
-lora_blink = False
 elapsed = 0
 while True:
     w.feed()
@@ -90,16 +89,10 @@ while True:
         # the gps module has a nasty memory leak just ignore and reload (Gps trackings stays in tact)
         supervisor.reload()
 
-    if gps_lock is True:
-        if lora_blink is True:
-            loraLED.value = True
-            lora_blink = False
-        else:
-            time.sleep(0.1)
-            loraLED.value = False
     if gps_lock is False:
         if gps_blink is True:
             gpsLED.value = True
+            loraLED.value = False
             gps_blink = False
         else:
             time.sleep(0.1)
@@ -117,8 +110,6 @@ while True:
             continue
         gps_lock = True
         gpsLED.value = True
-        if lora_blink is False:
-            lora_blink = True
         # We have a fix!
         elapsed=elapsed+1
             
@@ -128,7 +119,7 @@ while True:
             
         pos = aprs.makePosition(gps.latitude,gps.longitude,(gps.speed_knots*1.852),angle,gps.altitude_m,config.symbol)
 
-        if last_pos is not pos and elapsed is config.rate:
+        if (last_pos is not pos and elapsed is config.rate) or last_pos is None:
             last_pos = pos
             elapsed = 0
 
