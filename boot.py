@@ -25,7 +25,7 @@ if btn.value is True:
 else:
     print(f"boot: button pressed, enable console, enabling drive")
 
-    usb_cdc.enable(console=True, data=True)
+    usb_cdc.enable(console=True, data=False)
 
     new_name = "APRSTRKR"
     storage.remount("/", readonly=False)

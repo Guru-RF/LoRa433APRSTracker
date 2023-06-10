@@ -54,19 +54,7 @@ Speed = bytes ([
 gps.send_command(Speed)
 time.sleep(0.1)
 
-# Disable al other GPS data
-Disable_NMEA = bytes ([
-        0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0xF0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x24, # GxGGA
-        0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0xF0, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x2B, # GxGLL
-        0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0xF0, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x32, # GxGSA
-        0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0xF0, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x03, 0x39, # GxGSV
-        0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0xF0, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x05, 0x47, # GxVTG
-        0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0xF0, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x05, 0x47, # GxVTG
-        ])
-gps.send_command(Disable_NMEA)
-time.sleep(0.1)
-
-# Disable UBX data
+## Disable UBX data
 Disable_UBX = bytes ([
         0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x12, 0xB9, #NAV-POSLLH
         0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0x01, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x13, 0xC0, #NAV-STATUS
@@ -110,22 +98,30 @@ while True:
             continue
         gps_lock = True
         gpsLED.value = True
+
         # We have a fix!
         elapsed=elapsed+1
-            
         angle = -1
+        speed = -1
+        
         if gps.track_angle_deg is not None:
             angle = gps.track_angle_deg
+            speed = gps.speed_knots*1.852 
             
-        pos = aprs.makePosition(gps.latitude,gps.longitude,(gps.speed_knots*1.852),angle,gps.altitude_m,config.symbol)
+        pos = aprs.makePosition(gps.latitude,gps.longitude,speed,angle,config.symbol)
 
         if (last_pos is not pos and elapsed is config.rate) or last_pos is None:
             last_pos = pos
             elapsed = 0
 
-            ts = aprs.makeTimestamp('h',gps.timestamp_utc.tm_hour,gps.timestamp_utc.tm_min,gps.timestamp_utc.tm_sec)
+            ts = aprs.makeTimestamp('z',gps.timestamp_utc.tm_mday,gps.timestamp_utc.tm_hour,gps.timestamp_utc.tm_min,gps.timestamp_utc.tm_sec)
 
-            message = "{}>APRS:@{}{}{}".format(config.callsign, ts, pos, config.comment)
+            comment = config.comment
+            if gps.altitude_m is not None:
+                altitude = "/A={:06d}".format(int(gps.altitude_m*3.2808399))
+                comment = comment + altitude
+
+            message = "{}>APRS:@{}{}{}".format(config.callsign, ts, pos, comment)
             loraLED.value = True
             rfm9x.send(
                 bytes("{}".format("<"), "UTF-8") + binascii.unhexlify("FF") + binascii.unhexlify("01") +
