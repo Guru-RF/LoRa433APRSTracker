@@ -1,7 +1,8 @@
 callsign = "ON3URE-11"
 #symbol = '/b' # bike
 #symbol = '/>' # car
-symbol = '\>' # car
+#symbol = '\>' # car
+symbol = 'L0' # lora car
 #symbol = '/k' # truck
 #symbol = '/j' # jeep
 #symbol = '/v' # truck
