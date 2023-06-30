@@ -1,3 +1,4 @@
+power = 5 # 5 for 1W version 23 for the standard version
 callsign = "ON3URE-14"
 #symbol = '/b' # bike
 #symbol = '/>' # car
