@@ -21,7 +21,7 @@ if btn.value is True:
     storage.disable_usb_drive()
     storage.remount("/", readonly=False)
 
-    usb_cdc.enable(console=False, data=False)
+    usb_cdc.enable(console=True, data=False)
 else:
     print(f"boot: button pressed, enable console, enabling drive")
 
