@@ -12,3 +12,4 @@ symbol = 'L>' # lora car
 #symbol = '/U' # bus
 comment = "https://RF.Guru"
 rate = 5 # seconds
+keepalive = 900 # seconds
