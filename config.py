@@ -1,4 +1,5 @@
-power = 5 # 5 for 1W version 23 for the standard version
+power = 5 # min 5 max 23 (the 1W version is not configurable)
+type = "simple" # simple|highpower|solar|bicycle
 callsign = "ON3URE-14"
 #symbol = '/b' # bike
 #symbol = '/>' # car

@@ -65,10 +65,12 @@ time.sleep(0.1)
 
 # Start Tracking
 last_print = time.monotonic()
-last_pos = None
+last_lat = None
+last_lon = None
 gps_blink = False
 gps_lock = False
-elapsed = 0
+elapsed = time.time()
+keepalive = time.time()
 while True:
     w.feed()
     try:
@@ -100,7 +102,6 @@ while True:
         gpsLED.value = True
 
         # We have a fix!
-        elapsed=elapsed+1
         angle = -1
         speed = -1
         
@@ -109,25 +110,33 @@ while True:
             speed = gps.speed_knots*1.852 
             
         pos = aprs.makePosition(gps.latitude,gps.longitude,speed,angle,config.symbol)
+        lat = round(gps.latitude, 3)
+        lon = round(gps.longitude, 3)
 
-        if (last_pos is not pos and elapsed is config.rate) or last_pos is None:
-            last_pos = pos
-            elapsed = 0
+        if ((time.time()-elapsed) >= config.rate or last_lon is None):
+            elapsed = time.time()
+            if ((time.time()-keepalive) >= config.keepalive):
+                keepalive = time.time()
+                last_lat = 0
+                last_lon = 0
+            if (last_lat is not lat or last_lon is not lon):
+                last_lon = lon
+                last_lat = lat
 
-            ts = aprs.makeTimestamp('z',gps.timestamp_utc.tm_mday,gps.timestamp_utc.tm_hour,gps.timestamp_utc.tm_min,gps.timestamp_utc.tm_sec)
+                ts = aprs.makeTimestamp('z',gps.timestamp_utc.tm_mday,gps.timestamp_utc.tm_hour,gps.timestamp_utc.tm_min,gps.timestamp_utc.tm_sec)
 
-            comment = config.comment
-            if gps.altitude_m is not None:
-                altitude = "/A={:06d}".format(int(gps.altitude_m*3.2808399))
-                comment = comment + altitude
+                comment = config.comment
+                if gps.altitude_m is not None:
+                    altitude = "/A={:06d}".format(int(gps.altitude_m*3.2808399))
+                    comment = comment + altitude
 
-            message = "{}>APRS:@{}{}{}".format(config.callsign, ts, pos, comment)
-            loraLED.value = True
-            rfm9x.send(
-                bytes("{}".format("<"), "UTF-8") + binascii.unhexlify("FF") + binascii.unhexlify("01") +
-                bytes("{}".format(message), "UTF-8")
-            )
-            loraLED.value = False
-            gps = adafruit_gps.GPS(uart, debug=False) 
+                message = "{}>APRS:@{}{}{}".format(config.callsign, ts, pos, comment)
+                loraLED.value = True
+                rfm9x.send(
+                    bytes("{}".format("<"), "UTF-8") + binascii.unhexlify("FF") + binascii.unhexlify("01") +
+                    bytes("{}".format(message), "UTF-8")
+                )
+                loraLED.value = False
+                gps = adafruit_gps.GPS(uart, debug=False) 
         w.feed()
         time.sleep(0.1)
