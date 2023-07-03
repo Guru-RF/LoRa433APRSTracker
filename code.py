@@ -110,8 +110,8 @@ while True:
             speed = gps.speed_knots*1.852 
             
         pos = aprs.makePosition(gps.latitude,gps.longitude,speed,angle,config.symbol)
-        lat = round(gps.latitude, 3)
-        lon = round(gps.longitude, 3)
+        lat = round(gps.latitude, 2)
+        lon = round(gps.longitude, 2)
 
         if ((time.time()-elapsed) >= config.rate or last_lon is None):
             elapsed = time.time()
