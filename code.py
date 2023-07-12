@@ -29,6 +29,10 @@ loraLED = digitalio.DigitalInOut(board.GP11)
 loraLED.direction = digitalio.Direction.OUTPUT
 loraLED.value = False
 
+amp = digitalio.DigitalInOut(board.GP2)
+amp.direction = digitalio.Direction.OUTPUT
+amp.value = False
+
 # APRS encoder
 aprs = APRS()
 
@@ -41,6 +45,8 @@ spi = busio.SPI(board.GP18, MOSI=board.GP19, MISO=board.GP16)
 # Lora Module
 rfm9x = adafruit_rfm9x.RFM9x(spi, CS, RESET, RADIO_FREQ_MHZ, baudrate=1000000)
 rfm9x.tx_power = config.power # 5 min 23 max
+if config.type.lower() is 'highpower':
+    rfm9x.tx_power = 23
 
 # GPS Module (uart)
 uart = busio.UART(board.GP4, board.GP5, baudrate=9600, timeout=10, receiver_buffer_size=1024)
@@ -132,10 +138,14 @@ while True:
 
                 message = "{}>APRS:@{}{}{}".format(config.callsign, ts, pos, comment)
                 loraLED.value = True
+                if config.type.lower() is 'highpower':
+                    amp.value = True
                 rfm9x.send(
                     bytes("{}".format("<"), "UTF-8") + binascii.unhexlify("FF") + binascii.unhexlify("01") +
                     bytes("{}".format(message), "UTF-8")
                 )
+                if config.type.lower() is 'highpower':
+                    amp.value = False
                 loraLED.value = False
                 gps = adafruit_gps.GPS(uart, debug=False) 
         w.feed()
