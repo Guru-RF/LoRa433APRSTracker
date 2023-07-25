@@ -136,7 +136,7 @@ while True:
                     altitude = "/A={:06d}".format(int(gps.altitude_m*3.2808399))
                     comment = comment + altitude
 
-                message = "{}>APRS:@{}{}{}".format(config.callsign, ts, pos, comment)
+                message = "{}>APRFGT:@{}{}{}".format(config.callsign, ts, pos, comment)
                 loraLED.value = True
                 if config.type.lower() is 'highpower':
                     amp.value = True

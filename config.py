@@ -1,6 +1,6 @@
 power = 5 # min 5 max 23 (the 1W version is not configurable)
 type = "highpower" # simple|highpower|solar|bike
-callsign = "ON3URE-14"
+callsign = "ON3URE-11"
 #symbol = '/b' # bike
 #symbol = '/>' # car
 #symbol = '\>' # car
