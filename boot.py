@@ -11,7 +11,7 @@ gpsRST.value = False
 time.sleep(0.1)
 gpsRST.value = True
 
-btn = digitalio.DigitalInOut(board.GP15)
+btn = digitalio.DigitalInOut(board.GP6)
 btn.direction = digitalio.Direction.INPUT
 btn.pull = digitalio.Pull.UP
 

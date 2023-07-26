@@ -1,10 +1,10 @@
-power = 5 # min 5 max 23 (the 1W version is not configurable)
-type = "highpower" # simple|highpower|solar|bike
-callsign = "ON3URE-11"
-#symbol = '/b' # bike
+power = 23 # min 5 max 23 (the 1W version is not configurable)
+type = "bike" # simple|highpower|solar|bike
+callsign = "ON3URE-8"
+symbol = '/b' # bike
 #symbol = '/>' # car
 #symbol = '\>' # car
-symbol = 'L>' # lora car
+#symbol = 'L>' # lora car
 #symbol = '/k' # truck
 #symbol = '/j' # jeep
 #symbol = '/v' # truck

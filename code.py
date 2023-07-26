@@ -4,12 +4,20 @@ import busio
 import adafruit_gps
 import digitalio
 import adafruit_rfm9x
+from analogio import AnalogIn
 import binascii
 from APRS import APRS
 import supervisor
 from microcontroller import watchdog as w
 from watchdog import WatchDogMode
 import config
+
+
+def get_voltage(pin):
+    return (pin.value * 3.3) / 65536
+
+# Voltage adc
+analog_in = AnalogIn(board.GP26)
 
 # Configure Watchdog
 w.mode = WatchDogMode.RESET
@@ -132,6 +140,9 @@ while True:
                 ts = aprs.makeTimestamp('z',gps.timestamp_utc.tm_mday,gps.timestamp_utc.tm_hour,gps.timestamp_utc.tm_min,gps.timestamp_utc.tm_sec)
 
                 comment = config.comment
+                if config.type.lower() is 'bike':
+                    bat_voltage = round(get_voltage(analog_in),2)
+                    comment = comment + " bat:" + str(bat_voltage) + "V"
                 if gps.altitude_m is not None:
                     altitude = "/A={:06d}".format(int(gps.altitude_m*3.2808399))
                     comment = comment + altitude
