@@ -10,8 +10,13 @@ from APRS import APRS
 import supervisor
 from microcontroller import watchdog as w
 from watchdog import WatchDogMode
+from math import cos, sqrt
 import config
 
+def distance(Lat1, Long1, Lat2, Long2):
+    x = Lat2 - Lat1
+    y = (Long2 - Long1) * cos((Lat2 + Lat1)*0.00872664626)  
+    return int(round((111.319 * sqrt(x*x + y*y)*1000),0))
 
 def get_voltage(pin):
     return (pin.value * 3.3) / 65536
@@ -53,7 +58,7 @@ spi = busio.SPI(board.GP18, MOSI=board.GP19, MISO=board.GP16)
 # Lora Module
 rfm9x = adafruit_rfm9x.RFM9x(spi, CS, RESET, RADIO_FREQ_MHZ, baudrate=1000000)
 rfm9x.tx_power = config.power # 5 min 23 max
-if config.type.lower() is 'highpower':
+if config.pa is True:
     rfm9x.tx_power = 23
 
 # GPS Module (uart)
@@ -133,14 +138,14 @@ while True:
                 keepalive = time.time()
                 last_lat = 0
                 last_lon = 0
-            if (last_lat is not lat or last_lon is not lon):
+            if (distance(last_lat,last_lon,lat,lon) >= config.distance):
                 last_lon = lon
                 last_lat = lat
 
                 ts = aprs.makeTimestamp('z',gps.timestamp_utc.tm_mday,gps.timestamp_utc.tm_hour,gps.timestamp_utc.tm_min,gps.timestamp_utc.tm_sec)
 
                 comment = config.comment
-                if config.type.lower() is 'bike':
+                if config.voltage is True:
                     bat_voltage = round(get_voltage(analog_in),2)
                     comment = comment + " bat:" + str(bat_voltage) + "V"
                 if gps.altitude_m is not None:
@@ -149,13 +154,13 @@ while True:
 
                 message = "{}>APRFGT:@{}{}{}".format(config.callsign, ts, pos, comment)
                 loraLED.value = True
-                if config.type.lower() is 'highpower':
+                if config.pa is True:
                     amp.value = True
                 rfm9x.send(
                     bytes("{}".format("<"), "UTF-8") + binascii.unhexlify("FF") + binascii.unhexlify("01") +
                     bytes("{}".format(message), "UTF-8")
                 )
-                if config.type.lower() is 'highpower':
+                if config.pa is True:
                     amp.value = False
                 loraLED.value = False
                 gps = adafruit_gps.GPS(uart, debug=False) 

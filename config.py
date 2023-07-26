@@ -1,5 +1,5 @@
-power = 23 # min 5 max 23 (the 1W version is not configurable)
-type = "bike" # simple|highpower|solar|bike
+power = 23 # min 5 max 23 (the 1W PA version is not configurable, always maximum)
+pa = True # has a power amplifier
 callsign = "ON3URE-8"
 symbol = '/b' # bike
 #symbol = '/>' # car
@@ -11,6 +11,7 @@ symbol = '/b' # bike
 #symbol = '/u' # 18 wheeler
 #symbol = '/U' # bus
 comment = "https://RF.Guru"
-rate = 5 # seconds
-keepalive = 900 # seconds
+rate = 5 # seconds (packet frequency when moving)
+keepalive = 900 # in seconds (When no movement report every ...)
 distance = 150 # minimum distance change to report
+voltage = True # to measure voltage of the connected battery
