@@ -13,3 +13,4 @@ symbol = '/b' # bike
 comment = "https://RF.Guru"
 rate = 5 # seconds
 keepalive = 900 # seconds
+distance = 150 # minimum distance change to report
