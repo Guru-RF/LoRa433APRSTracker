@@ -15,8 +15,12 @@ btn = digitalio.DigitalInOut(board.GP6)
 btn.direction = digitalio.Direction.INPUT
 btn.pull = digitalio.Pull.UP
 
+btn2 = digitalio.DigitalInOut(board.GP15)
+btn2.direction = digitalio.Direction.INPUT
+btn2.pull = digitalio.Pull.UP
+
 # Disable devices only if dah/dit is not pressed.
-if btn.value is True:
+if btn.value is True and btn2.value is True:
     print(f"boot: button not pressed, disabling drive")
     storage.disable_usb_drive()
     storage.remount("/", readonly=False)

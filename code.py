@@ -13,9 +13,11 @@ from watchdog import WatchDogMode
 from math import cos, sqrt
 import config
 
-def distance(Lat1, Long1, Lat2, Long2):
-    x = Lat2 - Lat1
-    y = (Long2 - Long1) * cos((Lat2 + Lat1)*0.00872664626)  
+def distance(lat1, lon1, lat2, lon2):
+    if lat1 is None:
+        return 999999 
+    x = lat2 - lat1
+    y = (lon2 - lon1) * cos((lat2 + lat1)*0.00872664626)  
     return int(round((111.319 * sqrt(x*x + y*y)*1000),0))
 
 def get_voltage(pin):
@@ -136,11 +138,11 @@ while True:
             elapsed = time.time()
             if ((time.time()-keepalive) >= config.keepalive):
                 keepalive = time.time()
-                last_lat = 0
-                last_lon = 0
-            if (distance(last_lat,last_lon,lat,lon) >= config.distance):
-                last_lon = lon
+                last_lat = None
+                last_lon = None
+            if distance(last_lat,last_lon,lat,lon) >= config.distance:
                 last_lat = lat
+                last_lon = lon
 
                 ts = aprs.makeTimestamp('z',gps.timestamp_utc.tm_mday,gps.timestamp_utc.tm_hour,gps.timestamp_utc.tm_min,gps.timestamp_utc.tm_sec)
 
