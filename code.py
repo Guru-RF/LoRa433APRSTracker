@@ -10,15 +10,21 @@ from APRS import APRS
 import supervisor
 from microcontroller import watchdog as w
 from watchdog import WatchDogMode
-from math import cos, sqrt
+from math import sin, cos, sqrt, atan2, radians
 import config
 
 def distance(lat1, lon1, lat2, lon2):
     if lat1 is None:
-        return 999999 
-    x = lat2 - lat1
-    y = (lon2 - lon1) * cos((lat2 + lat1)*0.00872664626)  
-    return int(round((111.319 * sqrt(x*x + y*y)*1000),0))
+        return 999999
+    R = 6373.0
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+
+    a = sin(dlat / 2)**2 + cos(lat1) * cos(lat2) * sin(dlon / 2)**2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+
+    distance = R * c * 1000
+    return distance
 
 def get_voltage(pin):
     return (pin.value * 3.3) / 65536
@@ -134,13 +140,14 @@ while True:
         lat = round(gps.latitude, 2)
         lon = round(gps.longitude, 2)
 
+        if ((time.time()-keepalive) >= config.keepalive):
+            keepalive = time.time()
+            last_lat = None
+            last_lon = None
+
         if ((time.time()-elapsed) >= config.rate or last_lon is None):
-            elapsed = time.time()
-            if ((time.time()-keepalive) >= config.keepalive):
-                keepalive = time.time()
-                last_lat = None
-                last_lon = None
             if distance(last_lat,last_lon,lat,lon) >= config.distance:
+                elapsed = time.time()
                 last_lat = lat
                 last_lon = lon
 
