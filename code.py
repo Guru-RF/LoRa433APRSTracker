@@ -67,7 +67,7 @@ spi = busio.SPI(board.GP18, MOSI=board.GP19, MISO=board.GP16)
 rfm9x = adafruit_rfm9x.RFM9x(spi, CS, RESET, RADIO_FREQ_MHZ, baudrate=1000000)
 rfm9x.tx_power = config.power # 5 min 23 max
 if config.pa is True:
-    rfm9x.tx_power = 5
+    rfm9x.tx_power = 19
 
 # GPS Module (uart)
 uart = busio.UART(board.GP4, board.GP5, baudrate=9600, timeout=10, receiver_buffer_size=1024)
@@ -146,14 +146,19 @@ while True:
             last_lon = None
 
         if ((time.time()-elapsed) >= config.rate or last_lon is None):
-            if distance(last_lat,last_lon,lat,lon) >= config.distance:
+            my_distance = distance(last_lat,last_lon,lat,lon)
+            if my_distance >= config.distance:
                 elapsed = time.time()
                 last_lat = lat
                 last_lon = lon
 
                 ts = aprs.makeTimestamp('z',gps.timestamp_utc.tm_mday,gps.timestamp_utc.tm_hour,gps.timestamp_utc.tm_min,gps.timestamp_utc.tm_sec)
+                
 
                 comment = config.comment
+                # comment distance debug
+                comment = comment + " sats:" + str(gps.satellites)
+                comment = comment + " dist:" + str(my_distance)
                 if config.voltage is True:
                     bat_voltage = round(get_voltage(analog_in),2)
                     comment = comment + " bat:" + str(bat_voltage) + "V"
@@ -165,11 +170,13 @@ while True:
                 loraLED.value = True
                 if config.pa is True:
                     amp.value = True
+                    time.sleep(0.3)
                 rfm9x.send(
                     bytes("{}".format("<"), "UTF-8") + binascii.unhexlify("FF") + binascii.unhexlify("01") +
                     bytes("{}".format(message), "UTF-8")
                 )
                 if config.pa is True:
+                    time.sleep(0.1)
                     amp.value = False
                 loraLED.value = False
                 gps = adafruit_gps.GPS(uart, debug=False) 
