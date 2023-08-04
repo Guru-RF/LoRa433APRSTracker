@@ -16,21 +16,28 @@ import config
 def distance(lat1, lon1, lat2, lon2):
     if lat1 is None:
         return 999999
-    R = 6373.0
-    dlon = lon2 - lon1
-    dlat = lat2 - lat1
+    radius = 6.371  # m
 
-    a = sin(dlat / 2)**2 + cos(lat1) * cos(lat2) * sin(dlon / 2)**2
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+    a = (sin(dlat / 2) * sin(dlat / 2) +
+         cos(radians(lat1)) * cos(radians(lat2)) *
+         sin(dlon / 2) * sin(dlon / 2))
     c = 2 * atan2(sqrt(a), sqrt(1 - a))
+    return radius * c 
 
-    distance = R * c * 1000
-    return distance
 
 def get_voltage(pin):
-    return (pin.value * 3.3) / 65536
+    if config.pa is True:
+        return ((pin.value * 3.3) / 65536) + 10.6 + 0.7
+    else:
+        return ((pin.value * 3.3) / 65536) * 2
+
 
 # Voltage adc
-analog_in = AnalogIn(board.GP26)
+analog_in = AnalogIn(board.GP27)
+if config.pa is False:
+    analog_in = AnalogIn(board.GP26)
 
 # Configure Watchdog
 w.mode = WatchDogMode.RESET
