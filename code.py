@@ -10,13 +10,13 @@ from APRS import APRS
 import supervisor
 from microcontroller import watchdog as w
 from watchdog import WatchDogMode
-from math import sin, cos, sqrt, atan2, radians
+from math import sin, cos, sqrt, atan2, radians, log, ceil
 import config
 
 def distance(lat1, lon1, lat2, lon2):
     if lat1 is None:
         return 999999
-    radius = 6.371  # m
+    radius = 6371  # km
 
     dlat = radians(lat2 - lat1)
     dlon = radians(lon2 - lon1)
@@ -24,7 +24,7 @@ def distance(lat1, lon1, lat2, lon2):
          cos(radians(lat1)) * cos(radians(lat2)) *
          sin(dlon / 2) * sin(dlon / 2))
     c = 2 * atan2(sqrt(a), sqrt(1 - a))
-    return radius * c 
+    return int(round(radius * c * 1000,0)) 
 
 
 def get_voltage(pin):
@@ -32,6 +32,25 @@ def get_voltage(pin):
         return ((pin.value * 3.3) / 65536) + 10.6 + 0.7
     else:
         return ((pin.value * 3.3) / 65536) * 2
+
+
+def base91_encode(number):
+    text = []
+
+    if number < 0:
+        raise ValueError("Expected number to be positive integer")
+    elif number > 0:
+        max_n = ceil(log(number) / log(91))
+
+        for n in range(int(max_n), -1, -1):
+            quotient, number = divmod(number, 91**n)
+            text.append(chr(33 + quotient))
+
+    text = "".join(text).lstrip('!')
+    if len(text) == 1:
+        text = "!" + text
+    
+    return text    
 
 
 # Voltage adc
@@ -105,6 +124,8 @@ gps_blink = False
 gps_lock = False
 elapsed = time.time()
 keepalive = time.time()
+sequence = 0
+params = False
 while True:
     w.feed()
     try:
@@ -144,8 +165,6 @@ while True:
             speed = gps.speed_knots*1.852 
             
         pos = aprs.makePosition(gps.latitude,gps.longitude,speed,angle,config.symbol)
-        lat = round(gps.latitude, 2)
-        lon = round(gps.longitude, 2)
 
         if ((time.time()-keepalive) >= config.keepalive):
             keepalive = time.time()
@@ -153,26 +172,34 @@ while True:
             last_lon = None
 
         if ((time.time()-elapsed) >= config.rate or last_lon is None):
-            my_distance = distance(last_lat,last_lon,lat,lon)
-            if my_distance >= config.distance:
+            my_distance = distance(last_lat,last_lon,gps.latitude,gps.longitude)
+            if my_distance > int(config.distance):
                 elapsed = time.time()
-                last_lat = lat
-                last_lon = lon
+                last_lat = gps.latitude
+                last_lon = gps.longitude
 
                 ts = aprs.makeTimestamp('z',gps.timestamp_utc.tm_mday,gps.timestamp_utc.tm_hour,gps.timestamp_utc.tm_min,gps.timestamp_utc.tm_sec)
-                
 
                 comment = config.comment
-                # comment distance debug
-                comment = comment + " sats:" + str(gps.satellites)
-                comment = comment + " dist:" + str(my_distance)
+
+                bat_voltage = 0
                 if config.voltage is True:
-                    bat_voltage = round(get_voltage(analog_in),2)
-                    comment = comment + " bat:" + str(bat_voltage) + "V"
+                    bat_voltage = int(round(get_voltage(analog_in),2)*100)
+                # stats go here we need to safe sequence to disk ... 
+                sequence=sequence+1
+                #comment = comment + "|" + base91_encode(sequence) + base91_encode(int(gps.satellites)) + base91_encode(bat_voltage) + "|"
                 if gps.altitude_m is not None:
                     altitude = "/A={:06d}".format(int(gps.altitude_m*3.2808399))
                     comment = comment + altitude
 
+                #send this each boot ?
+                # if params is False:
+                # params = True 
+                #data = "PARM.Satelites,Battery,Temperature"
+                #data = "UNIT.Nr,Vdc,C"
+                #data = "EQNS.0,1,0,0,0.01,0,0,1,0"
+                #message = "{}>APRFGT::{}:{}".format(config.callsign, config.callsign, data)
+                
                 message = "{}>APRFGT:@{}{}{}".format(config.callsign, ts, pos, comment)
                 loraLED.value = True
                 if config.pa is True:
