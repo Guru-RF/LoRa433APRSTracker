@@ -53,6 +53,14 @@ def base91_encode(number):
     return text    
 
 
+# read sequence
+sequence=0
+try:
+    with open('/sequence', 'r') as f:
+        sequence = int(f.readline())
+except:
+        print("RO filesystem")
+
 # Voltage adc
 analog_in = AnalogIn(board.GP27)
 if config.pa is False:
@@ -116,6 +124,29 @@ Disable_UBX = bytes ([
 gps.send_command(Disable_UBX)
 time.sleep(0.1)
 
+aprsData = [
+    "PARM.Satelites,Battery,Temperature",
+    "UNIT.Nr,Vdc,C",
+    "EQNS.0,1,0,0,0.01,0,0,1,0" 
+] 
+
+for data in aprsData:
+    message = "{}>APRFGT::{}:{}".format(config.callsign, config.callsign, data)
+    loraLED.value = True
+    if config.pa is True:
+        amp.value = True
+        time.sleep(0.3)
+    rfm9x.send(
+        bytes("{}".format("<"), "UTF-8") + binascii.unhexlify("FF") + binascii.unhexlify("01") +
+        bytes("{}".format(message), "UTF-8")
+    )
+    if config.pa is True:
+        time.sleep(0.1)
+        amp.value = False
+    loraLED.value = False
+    w.feed()
+    time.sleep(0.5)
+
 # Start Tracking
 last_print = time.monotonic()
 last_lat = None
@@ -125,7 +156,6 @@ gps_lock = False
 elapsed = time.time()
 keepalive = time.time()
 sequence = 0
-params = False
 while True:
     w.feed()
     try:
@@ -185,20 +215,20 @@ while True:
                 bat_voltage = 0
                 if config.voltage is True:
                     bat_voltage = int(round(get_voltage(analog_in),2)*100)
-                # stats go here we need to safe sequence to disk ... 
+
                 sequence=sequence+1
-                #comment = comment + "|" + base91_encode(sequence) + base91_encode(int(gps.satellites)) + base91_encode(bat_voltage) + "|"
+                if sequence > 8191:
+                    sequence = 0
+                comment = comment + "|" + base91_encode(sequence) + base91_encode(int(gps.satellites)) + base91_encode(bat_voltage) + "|"
+                try:
+                    with open('/sequence', 'w') as f:
+                        f.write(str(sequence))
+                except:
+                    print("RO filesystem")
+
                 if gps.altitude_m is not None:
                     altitude = "/A={:06d}".format(int(gps.altitude_m*3.2808399))
                     comment = comment + altitude
-
-                #send this each boot ?
-                # if params is False:
-                # params = True 
-                #data = "PARM.Satelites,Battery,Temperature"
-                #data = "UNIT.Nr,Vdc,C"
-                #data = "EQNS.0,1,0,0,0.01,0,0,1,0"
-                #message = "{}>APRFGT::{}:{}".format(config.callsign, config.callsign, data)
                 
                 message = "{}>APRFGT:@{}{}{}".format(config.callsign, ts, pos, comment)
                 loraLED.value = True
