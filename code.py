@@ -101,7 +101,7 @@ spi = busio.SPI(board.GP18, MOSI=board.GP19, MISO=board.GP16)
 rfm9x = adafruit_rfm9x.RFM9x(spi, CS, RESET, RADIO_FREQ_MHZ, baudrate=1000000)
 rfm9x.tx_power = config.power # 5 min 23 max
 if config.pa is True:
-    rfm9x.tx_power = 19
+    rfm9x.tx_power = 23
 
 # GPS Module (uart)
 uart = busio.UART(board.GP4, board.GP5, baudrate=9600, timeout=10, receiver_buffer_size=1024)

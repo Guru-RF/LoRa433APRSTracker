@@ -1,6 +1,6 @@
 power = 23 # min 5 max 23 (the 1W PA version is not configurable, always maximum)
 pa = False # has a power amplifier
-callsign = "ON3URE-11"
+callsign = "ON3URE-1"
 #symbol = '/b' # bike
 #symbol = '/>' # car
 #symbol = '\>' # car
