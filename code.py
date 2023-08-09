@@ -13,6 +13,7 @@ from watchdog import WatchDogMode
 from math import sin, cos, sqrt, atan2, radians, log, ceil
 import config
 
+# geometry distance calculator in meters
 def distance(lat1, lon1, lat2, lon2):
     if lat1 is None:
         return 999999
@@ -27,6 +28,7 @@ def distance(lat1, lon1, lat2, lon2):
     return int(round(radius * c * 1000,0)) 
 
 
+# voltage meter (12v/4v)
 def get_voltage(pin):
     if config.pa is True:
         return ((pin.value * 3.3) / 65536) + 10.6 + 0.7
@@ -34,6 +36,7 @@ def get_voltage(pin):
         return ((pin.value * 3.3) / 65536) * 2
 
 
+# telemetry encoder
 def base91_encode(number):
     text = []
 
@@ -53,7 +56,7 @@ def base91_encode(number):
     return text    
 
 
-# read sequence
+# read telemetry sequence
 sequence=0
 try:
     with open('/sequence', 'r') as f:
@@ -61,14 +64,17 @@ try:
 except:
         print("RO filesystem")
 
-# Voltage adc
+# i2c
+i2c = busio.I2C(scl=board.GP6, sda=board.GP7)
+
+# voltage adc
 analog_in = AnalogIn(board.GP27)
 if config.pa is False:
     analog_in = AnalogIn(board.GP26)
 
-# Configure Watchdog
+# configure watchdog
 w.mode = WatchDogMode.RESET
-w.timeout=5 # Set a timeout of 5 seconds
+w.timeout=5 # set a timeout of 5 seconds
 w.feed()
 
 # configure LEDs
@@ -100,8 +106,6 @@ spi = busio.SPI(board.GP18, MOSI=board.GP19, MISO=board.GP16)
 # Lora Module
 rfm9x = adafruit_rfm9x.RFM9x(spi, CS, RESET, RADIO_FREQ_MHZ, baudrate=1000000)
 rfm9x.tx_power = config.power # 5 min 23 max
-if config.pa is True:
-    rfm9x.tx_power = 23
 
 # GPS Module (uart)
 uart = busio.UART(board.GP4, board.GP5, baudrate=9600, timeout=10, receiver_buffer_size=1024)
@@ -124,12 +128,39 @@ Disable_UBX = bytes ([
 gps.send_command(Disable_UBX)
 time.sleep(0.1)
 
+# default telemetry        
 aprsData = [
-    "PARM.Satelites,Battery,Temperature",
-    "UNIT.Nr,Vdc,C",
-    "EQNS.0,1,0,0,0.01,0,0,1,0" 
-] 
+    "PARM.Satelites",
+    "UNIT.Nr",
+    "EQNS.0,1,0" 
+]
 
+# add voltage meter if present
+if config.voltage is True:
+    for index, item in enumerate(aprsData):
+        if item.startswith('PARM'):
+            aprsData[index] = aprsData[index] + ",Battery"
+        if item.startswith('UNIT'):
+            aprsData[index] = aprsData[index] + ",Vdc"
+        if item.startswith('EQNS'):
+            aprsData[index] = aprsData[index] + ",0,0.01,0"
+
+# i2c modules
+shtc3 = False
+for i2c in config.i2c:
+    if i2c.lower is "shtc3":
+        for index, item in enumerate(aprsData):
+            if item.startswith('PARM'):
+                aprsData[index] = aprsData[index] + ",Temperature,Humidity"
+            if item.startswith('UNIT'):
+                aprsData[index] = aprsData[index] + ",C,%"
+            if item.startswith('EQNS'):
+                aprsData[index] = aprsData[index] + ",0,1,0,0,1,0"
+        import adafruit_shtc3
+        sht = adafruit_shtc3.SHTC3(i2c) 
+        shtc3 = True
+
+# send telemetry metadata once
 for data in aprsData:
     message = "{}>APRFGT::{}:{}".format(config.callsign, config.callsign, data)
     loraLED.value = True
@@ -147,7 +178,7 @@ for data in aprsData:
     w.feed()
     time.sleep(0.5)
 
-# Start Tracking
+# start tracking
 last_print = time.monotonic()
 last_lat = None
 last_lon = None
@@ -210,26 +241,33 @@ while True:
 
                 ts = aprs.makeTimestamp('z',gps.timestamp_utc.tm_mday,gps.timestamp_utc.tm_hour,gps.timestamp_utc.tm_min,gps.timestamp_utc.tm_sec)
 
+                # user comment
                 comment = config.comment
 
-                bat_voltage = 0
-                if config.voltage is True:
-                    bat_voltage = int(round(get_voltage(analog_in),2)*100)
-
+                # telemetry
                 sequence=sequence+1
                 if sequence > 8191:
                     sequence = 0
-                comment = comment + "|" + base91_encode(sequence) + base91_encode(int(gps.satellites)) + base91_encode(bat_voltage) + "|"
+                comment = comment + "|" + base91_encode(sequence) + base91_encode(int(gps.satellites))
+                if config.voltage is True:
+                    bat_voltage = int(round(get_voltage(analog_in),2)*100)
+                    comment = comment + base91_encode(bat_voltage)
+                if shtc3 is True:
+                    temperature, relative_humidity = sht.measurements
+                    comment = comment + base91_encode(temperature) + base91_encode(relative_humidity)
+                comment = comment + "|"
                 try:
                     with open('/sequence', 'w') as f:
                         f.write(str(sequence))
                 except:
                     print("RO filesystem")
 
+                # altitude
                 if gps.altitude_m is not None:
                     altitude = "/A={:06d}".format(int(gps.altitude_m*3.2808399))
                     comment = comment + altitude
-                
+
+                # send LoRa packet 
                 message = "{}>APRFGT:@{}{}{}".format(config.callsign, ts, pos, comment)
                 loraLED.value = True
                 if config.pa is True:

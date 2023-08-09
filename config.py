@@ -1,5 +1,5 @@
-power = 23 # min 5 max 23 (the 1W PA version is not configurable, always maximum)
-pa = False # has a power amplifier
+power = 23 # min 5dBm max 23dBm
+pa = False # has a power amplifier (adds 6dBm)
 callsign = "ON3URE-1"
 #symbol = '/b' # bike
 #symbol = '/>' # car
@@ -13,5 +13,6 @@ symbol = 'U>' # lora car
 comment = "https://RF.Guru"
 rate = 10 # seconds (packet frequency when moving)
 keepalive = 900 # in seconds (When no movement report every ...) when on solar/battary set this 900 (15 mins)
-distance = 50 # minimum distance change to report
+distance = 100 # minimum distance change to report
 voltage = True # to measure voltage of the connected battery
+i2c = ["SHTC3"]
