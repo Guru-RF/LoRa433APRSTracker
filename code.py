@@ -56,16 +56,19 @@ def base91_encode(number):
     return text    
 
 
-# read telemetry sequence
+# read telemetry sequence (sleep when in RO)
 sequence=0
 try:
+    with open('/check', 'w') as f:
+        f.write("ok")
+        f.close()
     with open('/sequence', 'r') as f:
-        sequence = int(f.readline())
+        sequence = int(f.read())
+        f.close()
 except:
-        print("RO filesystem")
-
-# i2c
-i2c = busio.I2C(scl=board.GP6, sda=board.GP7)
+        print("RO filesystem, sleeping forever")
+        while True:
+            time.sleep(1)
 
 # voltage adc
 analog_in = AnalogIn(board.GP27)
@@ -147,18 +150,24 @@ if config.voltage is True:
 
 # i2c modules
 shtc3 = False
-for i2c in config.i2c:
-    if i2c.lower is "shtc3":
-        for index, item in enumerate(aprsData):
-            if item.startswith('PARM'):
-                aprsData[index] = aprsData[index] + ",Temperature,Humidity"
-            if item.startswith('UNIT'):
-                aprsData[index] = aprsData[index] + ",C,%"
-            if item.startswith('EQNS'):
-                aprsData[index] = aprsData[index] + ",0,1,0,0,1,0"
-        import adafruit_shtc3
-        sht = adafruit_shtc3.SHTC3(i2c) 
-        shtc3 = True
+# i2c
+try:
+    i2c = busio.I2C(scl=board.GP7, sda=board.GP6)
+    for idex, item in enumerate(config.i2c):
+        if item.lower() is "shtc3":
+            for index, item in enumerate(aprsData):
+                if item.startswith('PARM'):
+                    aprsData[index] = aprsData[index] + ",Temperature,Humidity"
+                if item.startswith('UNIT'):
+                    aprsData[index] = aprsData[index] + ",deg.C,%"
+                if item.startswith('EQNS'):
+                    aprsData[index] = aprsData[index] + ",0,0.01,0,0,1,0"
+            import adafruit_shtc3
+            time.sleep(1)
+            sht = adafruit_shtc3.SHTC3(i2c) 
+            shtc3 = True
+except Exception as error:
+    print("I2C Disabled: ", error)
 
 # send telemetry metadata once
 for data in aprsData:
@@ -186,7 +195,6 @@ gps_blink = False
 gps_lock = False
 elapsed = time.time()
 keepalive = time.time()
-sequence = 0
 while True:
     w.feed()
     try:
@@ -254,11 +262,14 @@ while True:
                     comment = comment + base91_encode(bat_voltage)
                 if shtc3 is True:
                     temperature, relative_humidity = sht.measurements
-                    comment = comment + base91_encode(temperature) + base91_encode(relative_humidity)
+                    temp = int(round(temperature,2)*100)
+                    hum = int(round(relative_humidity,0))
+                    comment = comment + base91_encode(temp) + base91_encode(hum)
                 comment = comment + "|"
                 try:
                     with open('/sequence', 'w') as f:
                         f.write(str(sequence))
+                        f.close()
                 except:
                     print("RO filesystem")
 
