@@ -1,0 +1,1 @@
+each boot reset I2C bus by removing power via GP circuit (for SHTC3 sensor)

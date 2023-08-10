@@ -8,6 +8,7 @@ from analogio import AnalogIn
 import binascii
 from APRS import APRS
 import supervisor
+import microcontroller
 from microcontroller import watchdog as w
 from watchdog import WatchDogMode
 from math import sin, cos, sqrt, atan2, radians, log, ceil
@@ -152,6 +153,9 @@ if config.voltage is True:
 shtc3 = False
 # i2c
 try:
+    #power off i2c
+    time.sleep(1)
+    #power on i2c
     i2c = busio.I2C(scl=board.GP7, sda=board.GP6)
     for idex, item in enumerate(config.i2c):
         if item.lower() is "shtc3":
@@ -163,7 +167,6 @@ try:
                 if item.startswith('EQNS'):
                     aprsData[index] = aprsData[index] + ",0,0.01,0,0,1,0"
             import adafruit_shtc3
-            time.sleep(1)
             sht = adafruit_shtc3.SHTC3(i2c) 
             shtc3 = True
 except Exception as error:
