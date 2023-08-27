@@ -1,1 +1,2 @@
 each boot reset I2C bus by removing power via GP circuit (for SHTC3 sensor)
+send email (5 times ?) when battery is < via config
