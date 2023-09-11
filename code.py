@@ -98,6 +98,10 @@ amp = digitalio.DigitalInOut(board.GP2)
 amp.direction = digitalio.Direction.OUTPUT
 amp.value = False
 
+i2cPower = digitalio.DigitalInOut(board.GP3)
+i2cPower.direction = digitalio.Direction.OUTPUT
+i2cPower.value = False
+
 # APRS encoder
 aprs = APRS()
 
@@ -154,10 +158,16 @@ shtc3 = False
 # i2c
 try:
     #power off i2c
+    i2cPower.value = False
+    w.feed()
     time.sleep(1)
     #power on i2c
+    i2cPower.value = True
+    w.feed()
+    time.sleep(1)
     i2c = busio.I2C(scl=board.GP7, sda=board.GP6)
     for idex, item in enumerate(config.i2c):
+        w.feed()
         if item.lower() is "shtc3":
             for index, item in enumerate(aprsData):
                 if item.startswith('PARM'):
