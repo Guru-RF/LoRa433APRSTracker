@@ -160,11 +160,11 @@ try:
     #power off i2c
     i2cPower.value = False
     w.feed()
-    time.sleep(1)
+    time.sleep(0.20)
     #power on i2c
     i2cPower.value = True
     w.feed()
-    time.sleep(1)
+    time.sleep(0.20)
     i2c = busio.I2C(scl=board.GP7, sda=board.GP6)
     for idex, item in enumerate(config.i2c):
         w.feed()
@@ -275,6 +275,9 @@ while True:
                     comment = comment + base91_encode(bat_voltage)
                 if shtc3 is True:
                     temperature, relative_humidity = sht.measurements
+                    # if shtc failes ... just reload 
+                    if temperature is None:
+                        supervisor.reload()
                     temp = int(round(temperature,2)*100)
                     hum = int(round(relative_humidity,0))
                     comment = comment + base91_encode(temp) + base91_encode(hum)
