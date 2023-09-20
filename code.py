@@ -156,31 +156,31 @@ if config.voltage is True:
 # i2c modules
 shtc3 = False
 # i2c
-try:
-    #power off i2c
-    i2cPower.value = False
-    w.feed()
-    time.sleep(0.20)
-    #power on i2c
-    i2cPower.value = True
-    w.feed()
-    time.sleep(0.20)
-    i2c = busio.I2C(scl=board.GP7, sda=board.GP6)
-    for idex, item in enumerate(config.i2c):
+if config.i2c is True:
+    try:
+        #power on i2c
+        i2cPower.value = True
         w.feed()
-        if item.lower() is "shtc3":
-            for index, item in enumerate(aprsData):
-                if item.startswith('PARM'):
-                    aprsData[index] = aprsData[index] + ",Temperature,Humidity"
-                if item.startswith('UNIT'):
-                    aprsData[index] = aprsData[index] + ",deg.C,%"
-                if item.startswith('EQNS'):
-                    aprsData[index] = aprsData[index] + ",0,0.01,0,0,1,0"
-            import adafruit_shtc3
-            sht = adafruit_shtc3.SHTC3(i2c) 
-            shtc3 = True
-except Exception as error:
-    print("I2C Disabled: ", error)
+        time.sleep(1)
+        i2c = busio.I2C(scl=board.GP7, sda=board.GP6)
+        for idex, item in enumerate(config.i2cDevices):
+            w.feed()
+            if item.lower() is "shtc3":
+                for index, item in enumerate(aprsData):
+                    if item.startswith('PARM'):
+                        aprsData[index] = aprsData[index] + ",Temperature,Humidity"
+                    if item.startswith('UNIT'):
+                        aprsData[index] = aprsData[index] + ",deg.C,%"
+                    if item.startswith('EQNS'):
+                        aprsData[index] = aprsData[index] + ",0,0.01,0,0,1,0"
+                import adafruit_shtc3
+                sht = adafruit_shtc3.SHTC3(i2c) 
+                shtc3 = True
+    except Exception as error:
+        i2cPower.value = False
+        time.sleep(1)
+        supervisor.reload()
+        print("I2C err reloading: ", error)
 
 # send telemetry metadata once
 for data in aprsData:
@@ -275,11 +275,11 @@ while True:
                     comment = comment + base91_encode(bat_voltage)
                 if shtc3 is True:
                     temperature, relative_humidity = sht.measurements
-                    # if shtc failes ... just reload 
-                    if temperature is None:
-                        supervisor.reload()
                     temp = int(round(temperature,2)*100)
                     hum = int(round(relative_humidity,0))
+                    # if shtc failes ... just reload 
+                    if hum is None:
+                        supervisor.reload()
                     comment = comment + base91_encode(temp) + base91_encode(hum)
                 comment = comment + "|"
                 try:

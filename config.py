@@ -15,4 +15,5 @@ rate = 10 # seconds (packet frequency when moving)
 keepalive = 900 # in seconds (When no movement report every ...) when on solar/battary set this 900 (15 mins)
 distance = 100 # minimum distance change to report
 voltage = True # to measure voltage of the connected battery
-i2c = ["SHTC3"]
+i2c = True
+i2cDevices = ["SHTC3"]
