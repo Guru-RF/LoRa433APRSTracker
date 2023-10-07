@@ -1,5 +1,5 @@
 power = 23 # min 5dBm max 23dBm
-pa = False # has a power amplifier (adds 6dBm)
+hasPa = True # has a power amplifier (adds 6dBm)
 callsign = "ON3URE-15"
 #symbol = '/b' # bike
 #symbol = '/>' # car
@@ -15,4 +15,5 @@ rate = 10 # seconds (packet frequency when moving)
 keepalive = 900 # in seconds (When no movement report every ...) when on solar/battary set this 900 (15 mins)
 distance = 100 # minimum distance change to report
 voltage = True # to measure voltage of the connected battery
-i2c = ["SHTC3"]
+i2cEnabled = True
+i2cDevices = ["SHTC3"]

@@ -31,7 +31,7 @@ def distance(lat1, lon1, lat2, lon2):
 
 # voltage meter (12v/4v)
 def get_voltage(pin):
-    if config.pa is True:
+    if config.hasPa is True:
         return ((pin.value * 3.3) / 65536) + 10.6 + 0.7
     else:
         return ((pin.value * 3.3) / 65536) * 2
@@ -73,7 +73,7 @@ except:
 
 # voltage adc
 analog_in = AnalogIn(board.GP27)
-if config.pa is False:
+if config.hasPa is False:
     analog_in = AnalogIn(board.GP26)
 
 # configure watchdog
@@ -97,6 +97,10 @@ loraLED.value = False
 amp = digitalio.DigitalInOut(board.GP2)
 amp.direction = digitalio.Direction.OUTPUT
 amp.value = False
+
+i2cPower = digitalio.DigitalInOut(board.GP3)
+i2cPower.direction = digitalio.Direction.OUTPUT
+i2cPower.value = False
 
 # APRS encoder
 aprs = APRS()
@@ -152,38 +156,44 @@ if config.voltage is True:
 # i2c modules
 shtc3 = False
 # i2c
-try:
-    #power off i2c
-    time.sleep(1)
-    #power on i2c
-    i2c = busio.I2C(scl=board.GP7, sda=board.GP6)
-    for idex, item in enumerate(config.i2c):
-        if item.lower() is "shtc3":
-            for index, item in enumerate(aprsData):
-                if item.startswith('PARM'):
-                    aprsData[index] = aprsData[index] + ",Temperature,Humidity"
-                if item.startswith('UNIT'):
-                    aprsData[index] = aprsData[index] + ",deg.C,%"
-                if item.startswith('EQNS'):
-                    aprsData[index] = aprsData[index] + ",0,0.01,0,0,1,0"
-            import adafruit_shtc3
-            sht = adafruit_shtc3.SHTC3(i2c) 
-            shtc3 = True
-except Exception as error:
-    print("I2C Disabled: ", error)
+if config.i2cEnabled is True:
+    try:
+        #power on i2c
+        i2cPower.value = True
+        w.feed()
+        time.sleep(1)
+        i2c = busio.I2C(scl=board.GP7, sda=board.GP6)
+        for idex, item in enumerate(config.i2cDevices):
+            w.feed()
+            if item.lower() is "shtc3":
+                for index, item in enumerate(aprsData):
+                    if item.startswith('PARM'):
+                        aprsData[index] = aprsData[index] + ",Temperature,Humidity"
+                    if item.startswith('UNIT'):
+                        aprsData[index] = aprsData[index] + ",deg.C,%"
+                    if item.startswith('EQNS'):
+                        aprsData[index] = aprsData[index] + ",0,0.01,0,0,1,0"
+                import adafruit_shtc3
+                sht = adafruit_shtc3.SHTC3(i2c) 
+                shtc3 = True
+    except Exception as error:
+        i2cPower.value = False
+        time.sleep(1)
+        supervisor.reload()
+        print("I2C err reloading: ", error)
 
 # send telemetry metadata once
 for data in aprsData:
     message = "{}>APRFGT::{}:{}".format(config.callsign, config.callsign, data)
     loraLED.value = True
-    if config.pa is True:
+    if config.hasPa is True:
         amp.value = True
         time.sleep(0.3)
     rfm9x.send(
         bytes("{}".format("<"), "UTF-8") + binascii.unhexlify("FF") + binascii.unhexlify("01") +
         bytes("{}".format(message), "UTF-8")
     )
-    if config.pa is True:
+    if config.hasPa is True:
         time.sleep(0.1)
         amp.value = False
     loraLED.value = False
@@ -267,6 +277,9 @@ while True:
                     temperature, relative_humidity = sht.measurements
                     temp = int(round(temperature,2)*100)
                     hum = int(round(relative_humidity,0))
+                    # if shtc failes ... just reload 
+                    if hum is None:
+                        supervisor.reload()
                     comment = comment + base91_encode(temp) + base91_encode(hum)
                 comment = comment + "|"
                 try:
@@ -291,7 +304,7 @@ while True:
                     bytes("{}".format("<"), "UTF-8") + binascii.unhexlify("FF") + binascii.unhexlify("01") +
                     bytes("{}".format(message), "UTF-8")
                 )
-                if config.pa is True:
+                if config.hasPa is True:
                     time.sleep(0.1)
                     amp.value = False
                 loraLED.value = False
