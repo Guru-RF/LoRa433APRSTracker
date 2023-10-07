@@ -1,11 +1,11 @@
 power = 23 # min 5dBm max 23dBm
 pa = False # has a power amplifier (adds 6dBm)
-callsign = "ON3URE-11"
+callsign = "ON3URE-15"
 #symbol = '/b' # bike
 #symbol = '/>' # car
 #symbol = '\>' # car
-symbol = 'U>' # lora car
-#symbol = '/k' # truck
+#symbol = 'U>' # lora car
+#symbol = 'Uk' # truck
 #symbol = '/j' # jeep
 #symbol = '/v' # truck
 #symbol = '/u' # 18 wheeler
