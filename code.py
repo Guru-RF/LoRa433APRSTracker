@@ -256,6 +256,7 @@ gps_blink = False
 gps_lock = False
 elapsed = time.time()
 keepalive = time.time()
+skip1stbme680 = True
 while True:
     w.feed()
     try:
@@ -315,6 +316,8 @@ while True:
                 elapsed = time.time()
                 last_lat = gps.latitude
                 last_lon = gps.longitude
+                        
+                print(purple("Location: LAT: " + str(gps.latitude) + " LON: " + str(gps.longitude)))
 
                 ts = aprs.makeTimestamp('z',gps.timestamp_utc.tm_mday,gps.timestamp_utc.tm_hour,gps.timestamp_utc.tm_min,gps.timestamp_utc.tm_sec)
 
@@ -337,12 +340,20 @@ while True:
                     if hum is None:
                         supervisor.reload()
                     comment = comment + base91_encode(temp) + base91_encode(hum)
+                    print(purple("SHTC3: Temperature: " + str(temperature) + " Humidity: " + str(relative_humidity)))
                 if bme680 is True:
-                    temperature = i2c_bme680.temperature + config.bme680_tempOffset
-                    relative_humidity = i2c_bme680.relative_humidity
-                    temp = int(round(temperature,2)*100)
-                    hum = int(round(relative_humidity,0))
-                    comment = comment + base91_encode(temp) + base91_encode(hum)
+                    if skip1stbme680 is True: 
+                        print(purple("BME680: Skip first read to give BME some time to calibrate!"))
+                        temperature = i2c_bme680.temperature
+                        relative_humidity = i2c_bme680.relative_humidity
+                        skip1stbme680 = False
+                    else:
+                        temperature = i2c_bme680.temperature + config.bme680_tempOffset
+                        relative_humidity = i2c_bme680.relative_humidity
+                        temp = int(round(temperature,2)*100)
+                        hum = int(round(relative_humidity,0))
+                        comment = comment + base91_encode(temp) + base91_encode(hum)
+                        print(purple("BME680: Temperature: " + str(temperature) + " Humidity: " + str(relative_humidity)))
                 comment = comment + "|"
                 try:
                     with open('/sequence', 'w') as f:
@@ -356,6 +367,7 @@ while True:
                 if gps.altitude_m is not None:
                     altitude = "/A={:06d}".format(int(gps.altitude_m*3.2808399))
                     comment = comment + altitude
+                    print(purple("GPS Altitude: " + str(gps.altitude_m) + " m"))
 
                 # send LoRa packet 
                 message = "{}>APRFGT:@{}{}{}".format(config.callsign, ts, pos, comment)
