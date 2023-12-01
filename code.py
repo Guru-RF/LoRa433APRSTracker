@@ -291,7 +291,8 @@ while True:
         the_rtc = rtc.RTC()
        
         if gps_lock is False:
-            print(purple("We have a GPS FIX ! :)"))
+            print(purple("We have a GPS FIX !)"))
+            print(purple("Location: LAT: " + str(gps.latitude) + " LON: " + str(gps.longitude)))
 
         gps_lock = True
         gpsLED.value = True
