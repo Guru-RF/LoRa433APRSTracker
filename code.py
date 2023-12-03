@@ -15,8 +15,10 @@ from math import sin, cos, sqrt, atan2, radians, log, ceil
 import rtc
 import config
 
+
 # our version
 VERSION = "RF.Guru_LoRaAPRStracker 0.1" 
+
 
 def _format_datetime(datetime):
   return "{:02}/{:02}/{} {:02}:{:02}:{:02}".format(
@@ -97,7 +99,14 @@ except:
         while True:
             time.sleep(1)
 
+print(yellow("Init Watchdog"))
+# configure watchdog
+w.mode = WatchDogMode.RESET
+w.timeout=5 # set a timeout of 5 seconds
+
 print(yellow("Init PINs"))
+w.feed()
+
 # voltage adc
 analog_in = AnalogIn(board.GP27)
 if config.hasPa is False:
@@ -128,6 +137,7 @@ i2cPower.value = False
 aprs = APRS()
 
 print(yellow("Init LoRa"))
+w.feed()
 
 # LoRa APRS frequency
 RADIO_FREQ_MHZ = 433.775
@@ -162,6 +172,8 @@ gps.send_command(Disable_UBX)
 time.sleep(0.1)
 
 print(yellow("Init Telemetry"))
+w.feed()
+
 # default telemetry        
 aprsData = [
     "PARM.Satelites",
@@ -180,6 +192,7 @@ if config.voltage is True:
             aprsData[index] = aprsData[index] + ",0,0.01,0"
 
 print(yellow("Init i2c Modules"))
+w.feed()
 # i2c modules
 shtc3 = False
 bme680 = False
@@ -223,6 +236,7 @@ if config.i2cEnabled is True:
         print("I2C err reloading: ", error)
 
 print(yellow("Send Telemetry MetaDATA"))
+w.feed()
 # send telemetry metadata once
 for data in aprsData:
     message = "{}>APRFGT::{}:{}".format(config.callsign, config.callsign, data)
@@ -240,14 +254,9 @@ for data in aprsData:
     loraLED.value = False
     time.sleep(0.5)
 
-
-print(yellow("Init Watchdog"))
-# configure watchdog
-w.mode = WatchDogMode.RESET
-w.timeout=5 # set a timeout of 5 seconds
+print(yellow("Start Tracking"))
 w.feed()
 
-print(yellow("Start Tracking"))
 # start tracking
 last_print = time.monotonic()
 last_lat = None
