@@ -236,7 +236,6 @@ if config.i2cEnabled is True:
         print("I2C err reloading: ", error)
 
 print(yellow("Send Telemetry MetaDATA"))
-w.feed()
 # send telemetry metadata once
 for data in aprsData:
     message = "{}>APRFGT::{}:{}".format(config.callsign, config.callsign, data)
@@ -244,12 +243,15 @@ for data in aprsData:
     if config.hasPa is True:
         amp.value = True
         time.sleep(0.3)
+    print(yellow("LoRa send message: " + message))
     rfm9x.send(
         bytes("{}".format("<"), "UTF-8") + binascii.unhexlify("FF") + binascii.unhexlify("01") +
         bytes("{}".format(message), "UTF-8")
     )
+    w.feed()
     if config.hasPa is True:
         time.sleep(0.1)
+        w.feed()
         amp.value = False
     loraLED.value = False
     time.sleep(0.5)
