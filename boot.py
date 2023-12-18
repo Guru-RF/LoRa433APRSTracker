@@ -8,8 +8,9 @@ import digitalio
 gpsRST = digitalio.DigitalInOut(board.GP12)
 gpsRST.direction = digitalio.Direction.OUTPUT
 gpsRST.value = False
-time.sleep(0.1)
+time.sleep(0.5)
 gpsRST.value = True
+time.sleep(0.5)
 
 btn = digitalio.DigitalInOut(board.GP6)
 btn.direction = digitalio.Direction.INPUT

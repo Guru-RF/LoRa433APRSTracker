@@ -9,16 +9,12 @@ import binascii
 from APRS import APRS
 import supervisor
 import microcontroller
-from microcontroller import watchdog as w
-from watchdog import WatchDogMode
 from math import sin, cos, sqrt, atan2, radians, log, ceil
 import rtc
 import config
 
-
 # our version
 VERSION = "RF.Guru_LoRaAPRStracker 0.1" 
-
 
 def _format_datetime(datetime):
   return "{:02}/{:02}/{} {:02}:{:02}:{:02}".format(
@@ -99,13 +95,9 @@ except:
         while True:
             time.sleep(1)
 
-print(yellow("Init Watchdog"))
-# configure watchdog
-w.mode = WatchDogMode.RESET
-w.timeout=5 # set a timeout of 5 seconds
 
+time.sleep(1)
 print(yellow("Init PINs"))
-w.feed()
 
 # voltage adc
 analog_in = AnalogIn(board.GP27)
@@ -137,7 +129,6 @@ i2cPower.value = False
 aprs = APRS()
 
 print(yellow("Init LoRa"))
-w.feed()
 
 # LoRa APRS frequency
 RADIO_FREQ_MHZ = 433.775
@@ -172,7 +163,6 @@ gps.send_command(Disable_UBX)
 time.sleep(0.1)
 
 print(yellow("Init Telemetry"))
-w.feed()
 
 # default telemetry        
 aprsData = [
@@ -192,7 +182,6 @@ if config.voltage is True:
             aprsData[index] = aprsData[index] + ",0,0.01,0"
 
 print(yellow("Init i2c Modules"))
-w.feed()
 # i2c modules
 shtc3 = False
 bme680 = False
@@ -231,9 +220,9 @@ if config.i2cEnabled is True:
                 print(yellow(">bme680 loaded"))
     except Exception as error:
         i2cPower.value = False
+        print("I2C err reloading: ", error)
         time.sleep(1)
         supervisor.reload()
-        print("I2C err reloading: ", error)
 
 print(yellow("Send Telemetry MetaDATA"))
 # send telemetry metadata once
@@ -248,154 +237,154 @@ for data in aprsData:
         bytes("{}".format("<"), "UTF-8") + binascii.unhexlify("FF") + binascii.unhexlify("01") +
         bytes("{}".format(message), "UTF-8")
     )
-    w.feed()
     if config.hasPa is True:
         time.sleep(0.1)
-        w.feed()
         amp.value = False
     loraLED.value = False
     time.sleep(0.5)
 
 print(yellow("Start Tracking"))
-w.feed()
 
-# start tracking
-last_print = time.monotonic()
-last_lat = None
-last_lon = None
-gps_blink = False
-gps_lock = False
-elapsed = time.time()
-keepalive = time.time()
-skip1stbme680 = True
-while True:
-    w.feed()
-    try:
-        gps.update()
-    except MemoryError:
-        # the gps module has a nasty memory leak just ignore and reload (Gps trackings stays in tact)
-        supervisor.reload()
+try:
+    # start tracking
+    last_print = time.monotonic()
+    last_lat = None
+    last_lon = None
+    gps_blink = False
+    gps_lock = False
+    elapsed = time.time()
+    keepalive = time.time()
+    skip1stbme680 = True
+    while True:
+        try:
+            gps.update()
+        except MemoryError:
+            print(yellow("Memory Leak !!! rebooting ..."))
+            # the gps module has a nasty memory leak just ignore and reload (Gps trackings stays in tact)
+            supervisor.reload()
 
-    if gps_lock is False:
-        if gps_blink is True:
-            gpsLED.value = True
-            loraLED.value = False
-            gps_blink = False
-        else:
-            time.sleep(0.1)
-            gpsLED.value = False
-
-    current = time.monotonic()
-    if current - last_print >= 5:
-        last_print = current
-        if not gps.has_fix:
-            gps_lock = False
-            print(yellow("No GPS FIX!"))
-            # Try again if we don't have a fix yet.
-            if gps_blink is False:
-                gps_blink = True
-            w.feed()
-            continue
-        
-        # We have a fix!
-        rtc.set_time_source(gps)
-        the_rtc = rtc.RTC()
-       
         if gps_lock is False:
-            print(purple("We have a GPS FIX !)"))
-            print(purple("Location: LAT: " + str(gps.latitude) + " LON: " + str(gps.longitude)))
+            if gps_blink is True:
+                gpsLED.value = True
+                loraLED.value = False
+                gps_blink = False
+            else:
+                time.sleep(0.1)
+                gpsLED.value = False
 
-        gps_lock = True
-        gpsLED.value = True
-
-        angle = -1
-        speed = -1
-        
-        if gps.track_angle_deg is not None:
-            angle = gps.track_angle_deg
-            speed = gps.speed_knots*1.852 
+        current = time.monotonic()
+        if current - last_print >= 5:
+            last_print = current
+            if not gps.has_fix:
+                gps_lock = False
+                print(yellow("No GPS FIX!"))
+                # Try again if we don't have a fix yet.
+                if gps_blink is False:
+                    gps_blink = True
+                continue
             
-        pos = aprs.makePosition(gps.latitude,gps.longitude,speed,angle,config.symbol)
-
-        if ((time.time()-keepalive) >= config.keepalive):
-            keepalive = time.time()
-            last_lat = None
-            last_lon = None
-
-        if ((time.time()-elapsed) >= config.rate or last_lon is None):
-            my_distance = distance(last_lat,last_lon,gps.latitude,gps.longitude)
-            if my_distance > int(config.distance):
-                elapsed = time.time()
-                last_lat = gps.latitude
-                last_lon = gps.longitude
-                        
+            # We have a fix!
+            rtc.set_time_source(gps)
+            the_rtc = rtc.RTC()
+        
+            if gps_lock is False:
+                print(purple("We have a GPS FIX !)"))
                 print(purple("Location: LAT: " + str(gps.latitude) + " LON: " + str(gps.longitude)))
 
-                ts = aprs.makeTimestamp('z',gps.timestamp_utc.tm_mday,gps.timestamp_utc.tm_hour,gps.timestamp_utc.tm_min,gps.timestamp_utc.tm_sec)
+            gps_lock = True
+            gpsLED.value = True
 
-                # user comment
-                comment = config.comment
+            angle = -1
+            speed = -1
+            
+            if gps.track_angle_deg is not None:
+                angle = gps.track_angle_deg
+                speed = gps.speed_knots*1.852 
+                
+            pos = aprs.makePosition(gps.latitude,gps.longitude,speed,angle,config.symbol)
 
-                # telemetry
-                sequence=sequence+1
-                if sequence > 8191:
-                    sequence = 0
-                comment = comment + "|" + base91_encode(sequence) + base91_encode(int(gps.satellites))
-                if config.voltage is True:
-                    bat_voltage = int(round(get_voltage(analog_in),2)*100)
-                    comment = comment + base91_encode(bat_voltage)
-                if shtc3 is True:
-                    temperature, relative_humidity = i2c_shtc3.measurements
-                    temp = int(round(temperature,2)*100)
-                    hum = int(round(relative_humidity,0))
-                    # if shtc failes ... just reload 
-                    if hum is None:
-                        supervisor.reload()
-                    comment = comment + base91_encode(temp) + base91_encode(hum)
-                    print(purple("SHTC3: Temperature: " + str(temperature) + " Humidity: " + str(relative_humidity)))
-                if bme680 is True:
-                    if skip1stbme680 is True: 
-                        print(purple("BME680: Skip first read to give BME some time to calibrate!"))
-                        temperature = i2c_bme680.temperature
-                        relative_humidity = i2c_bme680.relative_humidity
-                        skip1stbme680 = False
-                    else:
-                        temperature = i2c_bme680.temperature + config.bme680_tempOffset
-                        relative_humidity = i2c_bme680.relative_humidity
+            if ((time.time()-keepalive) >= config.keepalive):
+                keepalive = time.time()
+                last_lat = None
+                last_lon = None
+
+            if ((time.time()-elapsed) >= config.rate or last_lon is None):
+                my_distance = distance(last_lat,last_lon,gps.latitude,gps.longitude)
+                if my_distance > int(config.distance):
+                    elapsed = time.time()
+                    last_lat = gps.latitude
+                    last_lon = gps.longitude
+                            
+                    print(purple("Location: LAT: " + str(gps.latitude) + " LON: " + str(gps.longitude)))
+
+                    ts = aprs.makeTimestamp('z',gps.timestamp_utc.tm_mday,gps.timestamp_utc.tm_hour,gps.timestamp_utc.tm_min,gps.timestamp_utc.tm_sec)
+
+                    # user comment
+                    comment = config.comment
+
+                    # telemetry
+                    sequence=sequence+1
+                    if sequence > 8191:
+                        sequence = 0
+                    comment = comment + "|" + base91_encode(sequence) + base91_encode(int(gps.satellites))
+                    if config.voltage is True:
+                        bat_voltage = int(round(get_voltage(analog_in),2)*100)
+                        comment = comment + base91_encode(bat_voltage)
+                    if shtc3 is True:
+                        temperature, relative_humidity = i2c_shtc3.measurements
                         temp = int(round(temperature,2)*100)
                         hum = int(round(relative_humidity,0))
+                        # if shtc failes ... just reload 
+                        if hum is None:
+                            supervisor.reload()
                         comment = comment + base91_encode(temp) + base91_encode(hum)
-                        print(purple("BME680: Temperature: " + str(temperature) + " Humidity: " + str(relative_humidity)))
-                comment = comment + "|"
-                try:
-                    with open('/sequence', 'w') as f:
-                        print(purple("Update Sequence: " + str(sequence)))
-                        f.write(str(sequence))
-                        f.close()
-                except:
-                    print(yellow("RO filesystem"))
+                        print(purple("SHTC3: Temperature: " + str(temperature) + " Humidity: " + str(relative_humidity)))
+                    if bme680 is True:
+                        if skip1stbme680 is True: 
+                            print(purple("BME680: Skip first read to give BME some time to calibrate!"))
+                            temperature = i2c_bme680.temperature
+                            relative_humidity = i2c_bme680.relative_humidity
+                            skip1stbme680 = False
+                        else:
+                            temperature = i2c_bme680.temperature + config.bme680_tempOffset
+                            relative_humidity = i2c_bme680.relative_humidity
+                            temp = int(round(temperature,2)*100)
+                            hum = int(round(relative_humidity,0))
+                            comment = comment + base91_encode(temp) + base91_encode(hum)
+                            print(purple("BME680: Temperature: " + str(temperature) + " Humidity: " + str(relative_humidity)))
+                    comment = comment + "|"
+                    try:
+                        with open('/sequence', 'w') as f:
+                            print(purple("Update Sequence: " + str(sequence)))
+                            f.write(str(sequence))
+                            f.close()
+                    except:
+                        print(yellow("RO filesystem"))
 
-                # altitude
-                if gps.altitude_m is not None:
-                    altitude = "/A={:06d}".format(int(gps.altitude_m*3.2808399))
-                    comment = comment + altitude
-                    print(purple("GPS Altitude: " + str(gps.altitude_m) + " m"))
+                    # altitude
+                    if gps.altitude_m is not None:
+                        altitude = "/A={:06d}".format(int(gps.altitude_m*3.2808399))
+                        comment = comment + altitude
+                        print(purple("GPS Altitude: " + str(gps.altitude_m) + " m"))
 
-                # send LoRa packet 
-                message = "{}>APRFGT:@{}{}{}".format(config.callsign, ts, pos, comment)
-                loraLED.value = True
-                if config.hasPa is True:
-                    amp.value = True
-                    time.sleep(0.3)
-                print(purple("LoRa send message: " + message))
-                rfm9x.send(
-                    bytes("{}".format("<"), "UTF-8") + binascii.unhexlify("FF") + binascii.unhexlify("01") +
-                    bytes("{}".format(message), "UTF-8")
-                )
-                if config.hasPa is True:
-                    time.sleep(0.1)
-                    amp.value = False
-                loraLED.value = False
-                gps = adafruit_gps.GPS(uart, debug=False) 
-        w.feed()
-        time.sleep(0.1)
+                    # send LoRa packet 
+                    message = "{}>APRFGT:@{}{}{}".format(config.callsign, ts, pos, comment)
+                    loraLED.value = True
+                    if config.hasPa is True:
+                        amp.value = True
+                        time.sleep(0.3)
+                    print(purple("LoRa send message: " + message))
+                    rfm9x.send(
+                        bytes("{}".format("<"), "UTF-8") + binascii.unhexlify("FF") + binascii.unhexlify("01") +
+                        bytes("{}".format(message), "UTF-8")
+                    )
+                    if config.hasPa is True:
+                        time.sleep(0.1)
+                        amp.value = False
+                    loraLED.value = False
+                    gps = adafruit_gps.GPS(uart, debug=False) 
+            time.sleep(0.1)
+except Exception as error:
+    print("Tracking err reloading: ", error)
+    time.sleep(1)
+    supervisor.reload()
