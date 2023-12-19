@@ -7,7 +7,6 @@ import adafruit_rfm9x
 from analogio import AnalogIn
 import binascii
 from APRS import APRS
-import supervisor
 import microcontroller
 from math import sin, cos, sqrt, atan2, radians, log, ceil
 import rtc
@@ -128,124 +127,124 @@ i2cPower.value = False
 # APRS encoder
 aprs = APRS()
 
-print(yellow("Init LoRa"))
-
-# LoRa APRS frequency
-RADIO_FREQ_MHZ = 433.775
-CS = digitalio.DigitalInOut(board.GP21)
-RESET = digitalio.DigitalInOut(board.GP20)
-spi = busio.SPI(board.GP18, MOSI=board.GP19, MISO=board.GP16)
-
-# Lora Module
-rfm9x = adafruit_rfm9x.RFM9x(spi, CS, RESET, RADIO_FREQ_MHZ, baudrate=1000000)
-rfm9x.tx_power = config.power # 5 min 23 max
-
-print(yellow("Init GPS"))
-# GPS Module (uart)
-uart = busio.UART(board.GP4, board.GP5, baudrate=9600, timeout=10, receiver_buffer_size=1024)
-gps = adafruit_gps.GPS(uart, debug=False) 
-
-# Set GPS speed to 1HZ
-Speed = bytes ([
-        0xB5,0x62,0x06,0x08,0x06,0x00,0xE8,0x03,0x01,0x00,0x01,0x00,0x01,0x39 #1Hz
-        #0xB5, 0x62, 0x06, 0x08, 0x06, 0x00, 0xC8, 0x00, 0x01, 0x00, 0x01, 0x00, 0xDE, 0x6A 5hz
-])
-gps.send_command(Speed)
-time.sleep(0.1)
-
-## Disable UBX data
-Disable_UBX = bytes ([
-        0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x12, 0xB9, #NAV-POSLLH
-        0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0x01, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x13, 0xC0, #NAV-STATUS
-        0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0x01, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x13, 0xC0, #NAV-STATUS
-])
-gps.send_command(Disable_UBX)
-time.sleep(0.1)
-
-print(yellow("Init Telemetry"))
-
-# default telemetry        
-aprsData = [
-    "PARM.Satelites",
-    "UNIT.Nr",
-    "EQNS.0,1,0" 
-]
-
-# add voltage meter if present
-if config.voltage is True:
-    for index, item in enumerate(aprsData):
-        if item.startswith('PARM'):
-            aprsData[index] = aprsData[index] + ",Battery"
-        if item.startswith('UNIT'):
-            aprsData[index] = aprsData[index] + ",Vdc"
-        if item.startswith('EQNS'):
-            aprsData[index] = aprsData[index] + ",0,0.01,0"
-
-print(yellow("Init i2c Modules"))
-# i2c modules
-shtc3 = False
-bme680 = False
-# i2c
-if config.i2cEnabled is True:
-    try:
-        #power on i2c
-        i2cPower.value = True
-        time.sleep(1)
-        i2c = busio.I2C(scl=board.GP7, sda=board.GP6)
-        for idex, item in enumerate(config.i2cDevices):
-            if item.lower() is "shtc3":
-                for index, item in enumerate(aprsData):
-                    if item.startswith('PARM'):
-                        aprsData[index] = aprsData[index] + ",Temperature,Humidity"
-                    if item.startswith('UNIT'):
-                        aprsData[index] = aprsData[index] + ",deg.C,%"
-                    if item.startswith('EQNS'):
-                        aprsData[index] = aprsData[index] + ",0,0.01,0,0,1,0"
-                import adafruit_shtc3
-                i2c_shtc3 = adafruit_shtc3.SHTC3(i2c) 
-                shtc3 = True
-                print(yellow(">shtc loaded"))
-            if item.lower() is "bme680":
-                for index, item in enumerate(aprsData):
-                    if item.startswith('PARM'):
-                        aprsData[index] = aprsData[index] + ",Temperature,Humidity"
-                    if item.startswith('UNIT'):
-                        aprsData[index] = aprsData[index] + ",deg.C,%"
-                    if item.startswith('EQNS'):
-                        aprsData[index] = aprsData[index] + ",0,0.01,0,0,1,0"
-                import adafruit_bme680
-                i2c_bme680 = adafruit_bme680.Adafruit_BME680_I2C(i2c)
-                i2c_bme680.sea_level_pressure = 1015
-                bme680 = True
-                print(yellow(">bme680 loaded"))
-    except Exception as error:
-        i2cPower.value = False
-        print("I2C err reloading: ", error)
-        time.sleep(1)
-        supervisor.reload()
-
-print(yellow("Send Telemetry MetaDATA"))
-# send telemetry metadata once
-for data in aprsData:
-    message = "{}>APRFGT::{}:{}".format(config.callsign, config.callsign, data)
-    loraLED.value = True
-    if config.hasPa is True:
-        amp.value = True
-        time.sleep(0.3)
-    print(yellow("LoRa send message: " + message))
-    rfm9x.send(
-        bytes("{}".format("<"), "UTF-8") + binascii.unhexlify("FF") + binascii.unhexlify("01") +
-        bytes("{}".format(message), "UTF-8")
-    )
-    if config.hasPa is True:
-        time.sleep(0.1)
-        amp.value = False
-    loraLED.value = False
-    time.sleep(0.5)
-
-print(yellow("Start Tracking"))
-
 try:
+    print(yellow("Init LoRa"))
+
+    # LoRa APRS frequency
+    RADIO_FREQ_MHZ = 433.775
+    CS = digitalio.DigitalInOut(board.GP21)
+    RESET = digitalio.DigitalInOut(board.GP20)
+    spi = busio.SPI(board.GP18, MOSI=board.GP19, MISO=board.GP16)
+
+    # Lora Module
+    rfm9x = adafruit_rfm9x.RFM9x(spi, CS, RESET, RADIO_FREQ_MHZ, baudrate=1000000)
+    rfm9x.tx_power = config.power # 5 min 23 max
+
+    print(yellow("Init GPS"))
+    # GPS Module (uart)
+    uart = busio.UART(board.GP4, board.GP5, baudrate=9600, timeout=10, receiver_buffer_size=1024)
+    gps = adafruit_gps.GPS(uart, debug=False) 
+
+    # Set GPS speed to 1HZ
+    Speed = bytes ([
+            0xB5,0x62,0x06,0x08,0x06,0x00,0xE8,0x03,0x01,0x00,0x01,0x00,0x01,0x39 #1Hz
+            #0xB5, 0x62, 0x06, 0x08, 0x06, 0x00, 0xC8, 0x00, 0x01, 0x00, 0x01, 0x00, 0xDE, 0x6A 5hz
+    ])
+    gps.send_command(Speed)
+    time.sleep(0.1)
+
+    ## Disable UBX data
+    Disable_UBX = bytes ([
+            0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x12, 0xB9, #NAV-POSLLH
+            0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0x01, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x13, 0xC0, #NAV-STATUS
+            0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0x01, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x13, 0xC0, #NAV-STATUS
+    ])
+    gps.send_command(Disable_UBX)
+    time.sleep(0.1)
+
+    print(yellow("Init Telemetry"))
+
+    # default telemetry        
+    aprsData = [
+        "PARM.Satelites",
+        "UNIT.Nr",
+        "EQNS.0,1,0" 
+    ]
+
+    # add voltage meter if present
+    if config.voltage is True:
+        for index, item in enumerate(aprsData):
+            if item.startswith('PARM'):
+                aprsData[index] = aprsData[index] + ",Battery"
+            if item.startswith('UNIT'):
+                aprsData[index] = aprsData[index] + ",Vdc"
+            if item.startswith('EQNS'):
+                aprsData[index] = aprsData[index] + ",0,0.01,0"
+
+    print(yellow("Init i2c Modules"))
+    # i2c modules
+    shtc3 = False
+    bme680 = False
+    # i2c
+    if config.i2cEnabled is True:
+        try:
+            #power on i2c
+            i2cPower.value = True
+            time.sleep(1)
+            i2c = busio.I2C(scl=board.GP7, sda=board.GP6)
+            for idex, item in enumerate(config.i2cDevices):
+                if item.lower() is "shtc3":
+                    for index, item in enumerate(aprsData):
+                        if item.startswith('PARM'):
+                            aprsData[index] = aprsData[index] + ",Temperature,Humidity"
+                        if item.startswith('UNIT'):
+                            aprsData[index] = aprsData[index] + ",deg.C,%"
+                        if item.startswith('EQNS'):
+                            aprsData[index] = aprsData[index] + ",0,0.01,0,0,1,0"
+                    import adafruit_shtc3
+                    i2c_shtc3 = adafruit_shtc3.SHTC3(i2c) 
+                    shtc3 = True
+                    print(yellow(">shtc loaded"))
+                if item.lower() is "bme680":
+                    for index, item in enumerate(aprsData):
+                        if item.startswith('PARM'):
+                            aprsData[index] = aprsData[index] + ",Temperature,Humidity"
+                        if item.startswith('UNIT'):
+                            aprsData[index] = aprsData[index] + ",deg.C,%"
+                        if item.startswith('EQNS'):
+                            aprsData[index] = aprsData[index] + ",0,0.01,0,0,1,0"
+                    import adafruit_bme680
+                    i2c_bme680 = adafruit_bme680.Adafruit_BME680_I2C(i2c)
+                    i2c_bme680.sea_level_pressure = 1015
+                    bme680 = True
+                    print(yellow(">bme680 loaded"))
+        except Exception as error:
+            i2cPower.value = False
+            print("I2C err reloading: ", error)
+            time.sleep(1)
+            microcontroller.reset()
+
+    print(yellow("Send Telemetry MetaDATA"))
+    # send telemetry metadata once
+    for data in aprsData:
+        message = "{}>APRFGT::{}:{}".format(config.callsign, config.callsign, data)
+        loraLED.value = True
+        if config.hasPa is True:
+            amp.value = True
+            time.sleep(0.3)
+        print(yellow("LoRa send message: " + message))
+        rfm9x.send(
+            bytes("{}".format("<"), "UTF-8") + binascii.unhexlify("FF") + binascii.unhexlify("01") +
+            bytes("{}".format(message), "UTF-8")
+        )
+        if config.hasPa is True:
+            time.sleep(0.1)
+            amp.value = False
+        loraLED.value = False
+        time.sleep(0.5)
+
+    print(yellow("Start Tracking"))
+
     # start tracking
     last_print = time.monotonic()
     last_lat = None
@@ -261,7 +260,7 @@ try:
         except MemoryError:
             print(yellow("Memory Leak !!! rebooting ..."))
             # the gps module has a nasty memory leak just ignore and reload (Gps trackings stays in tact)
-            supervisor.reload()
+            microcontroller.reset()
 
         if gps_lock is False:
             if gps_blink is True:
@@ -387,4 +386,4 @@ try:
 except Exception as error:
     print("Tracking err reloading: ", error)
     time.sleep(1)
-    supervisor.reload()
+    microcontroller.reset()
