@@ -1,5 +1,3 @@
-Build for circuitpython 8.1
-more information soon
 
 lib/adafruit_rfm9x.mpy is heavily modified to work with loraAPRS
 you can find the modifications here:
