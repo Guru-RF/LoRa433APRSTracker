@@ -19,7 +19,7 @@ w.timeout=5
 w.mode = WatchDogMode.RESET
 w.feed()
 
-# wait for console
+# wait for console()
 time.sleep(2)
 w.feed()
 
@@ -40,10 +40,6 @@ except:
         while True:
             w.feed()
             time.sleep(1)
-
-class Nop(object):
-    def nop(*args, **kw): pass
-    def __getattr__(self, _): return self.nop
 
 def _format_datetime(datetime):
   return "{:02}/{:02}/{} {:02}:{:02}:{:02}".format(
