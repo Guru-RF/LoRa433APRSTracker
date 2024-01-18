@@ -4,6 +4,24 @@ import storage
 import time
 import digitalio
 
+# configure LEDs
+pwrLED = digitalio.DigitalInOut(board.GP9)
+pwrLED.direction = digitalio.Direction.OUTPUT
+pwrLED.value = True
+
+gpsLED = digitalio.DigitalInOut(board.GP10)
+gpsLED.direction = digitalio.Direction.OUTPUT
+gpsLED.value = False
+
+loraLED = digitalio.DigitalInOut(board.GP11)
+loraLED.direction = digitalio.Direction.OUTPUT
+loraLED.value = False
+
+# Disable AMP
+amp = digitalio.DigitalInOut(board.GP2)
+amp.direction = digitalio.Direction.OUTPUT
+amp.value = False
+
 # init gps
 gpsRST = digitalio.DigitalInOut(board.GP12)
 gpsRST.direction = digitalio.Direction.OUTPUT

@@ -11,9 +11,39 @@ import microcontroller
 from math import sin, cos, sqrt, atan2, radians, log, ceil
 import rtc
 import config
+from microcontroller import watchdog as w
+from watchdog import WatchDogMode
+
+# configure watchdog
+w.timeout=5
+w.mode = WatchDogMode.RESET
+w.feed()
+
+# wait for console
+time.sleep(2)
+w.feed()
 
 # our version
 VERSION = "RF.Guru_LoRaAPRStracker 0.1" 
+
+# read telemetry sequence (sleep when in RO)
+sequence=0
+try:
+    with open('/check', 'w') as f:
+        f.write("ok")
+        f.close()
+    with open('/sequence', 'r') as f:
+        sequence = int(f.read())
+        f.close()
+except:
+        print("RO filesystem, sleeping forever")
+        while True:
+            w.feed()
+            time.sleep(1)
+
+class Nop(object):
+    def nop(*args, **kw): pass
+    def __getattr__(self, _): return self.nop
 
 def _format_datetime(datetime):
   return "{:02}/{:02}/{} {:02}:{:02}:{:02}".format(
@@ -80,22 +110,6 @@ def base91_encode(number):
 
 print(red(config.callsign + " -=- " + VERSION))
 
-# read telemetry sequence (sleep when in RO)
-sequence=0
-try:
-    with open('/check', 'w') as f:
-        f.write("ok")
-        f.close()
-    with open('/sequence', 'r') as f:
-        sequence = int(f.read())
-        f.close()
-except:
-        print(yellow("RO filesystem, sleeping forever"))
-        while True:
-            time.sleep(1)
-
-
-time.sleep(1)
 print(yellow("Init PINs"))
 
 # voltage adc
@@ -124,10 +138,10 @@ i2cPower = digitalio.DigitalInOut(board.GP3)
 i2cPower.direction = digitalio.Direction.OUTPUT
 i2cPower.value = False
 
-# APRS encoder
-aprs = APRS()
-
 try:
+    # APRS encoder
+    aprs = APRS()
+
     print(yellow("Init LoRa"))
 
     # LoRa APRS frequency
@@ -233,7 +247,7 @@ try:
             amp.value = True
             time.sleep(0.3)
         print(yellow("LoRa send message: " + message))
-        rfm9x.send(
+        rfm9x.send(w,
             bytes("{}".format("<"), "UTF-8") + binascii.unhexlify("FF") + binascii.unhexlify("01") +
             bytes("{}".format(message), "UTF-8")
         )
@@ -255,6 +269,7 @@ try:
     keepalive = time.time()
     skip1stbme680 = True
     while True:
+        w.feed()
         try:
             gps.update()
         except MemoryError:
@@ -283,6 +298,7 @@ try:
                 continue
             
             # We have a fix!
+            w.feed()
             rtc.set_time_source(gps)
             the_rtc = rtc.RTC()
         
@@ -352,13 +368,6 @@ try:
                             comment = comment + base91_encode(temp) + base91_encode(hum)
                             print(purple("BME680: Temperature: " + str(temperature) + " Humidity: " + str(relative_humidity)))
                     comment = comment + "|"
-                    try:
-                        with open('/sequence', 'w') as f:
-                            print(purple("Update Sequence: " + str(sequence)))
-                            f.write(str(sequence))
-                            f.close()
-                    except:
-                        print(yellow("RO filesystem"))
 
                     # altitude
                     if gps.altitude_m is not None:
@@ -373,7 +382,7 @@ try:
                         amp.value = True
                         time.sleep(0.3)
                     print(purple("LoRa send message: " + message))
-                    rfm9x.send(
+                    rfm9x.send(w,
                         bytes("{}".format("<"), "UTF-8") + binascii.unhexlify("FF") + binascii.unhexlify("01") +
                         bytes("{}".format(message), "UTF-8")
                     )
@@ -381,7 +390,10 @@ try:
                         time.sleep(0.1)
                         amp.value = False
                     loraLED.value = False
-                    gps = adafruit_gps.GPS(uart, debug=False) 
+                    with open('/sequence', 'w') as f:
+                        print(purple("Update Sequence: " + str(sequence)))
+                        f.write(str(sequence))
+                        f.close()
             time.sleep(0.1)
 except Exception as error:
     print("Tracking err reloading: ", error)
