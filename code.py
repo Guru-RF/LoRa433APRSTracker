@@ -52,9 +52,7 @@ def _format_datetime(datetime):
   )
 
 def year():
-  return "{}".format(
-    time.localtime().tm_year
-  )
+  return int(time.localtime().tm_year)
 
 def purple(data):
   stamp = "{}".format(_format_datetime(time.localtime()))
@@ -300,13 +298,18 @@ try:
             
             # We have a fix!
             w.feed()
-            
-            if year() is '1970':
+
+            # epoch 
+            if year() is 1970:
                 rtc.set_time_source(gps)
                 the_rtc = rtc.RTC()
-                if year() is '1970':
-                    print(yellow("GPS clock not synced, retrying ..."))
-                    continue
+
+            # non synced gps year
+            if year() < 2023:
+                rtc.set_time_source(gps)
+                the_rtc = rtc.RTC()
+                print(yellow("GPS clock not synced, retrying ..."))
+                continue
 
             if gps_lock is False:
                 print(purple("We have a GPS fix && Clock is locked to GPS !)"))
