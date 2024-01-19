@@ -26,9 +26,9 @@ amp.value = False
 gpsRST = digitalio.DigitalInOut(board.GP12)
 gpsRST.direction = digitalio.Direction.OUTPUT
 gpsRST.value = False
-time.sleep(0.5)
+time.sleep(1)
 gpsRST.value = True
-time.sleep(0.5)
+time.sleep(1)
 
 btn = digitalio.DigitalInOut(board.GP6)
 btn.direction = digitalio.Direction.INPUT

@@ -1,6 +1,6 @@
 power = 23 # min 5dBm max 23dBm
 hasPa = True # has a power amplifier (adds 6dBm)
-callsign = "ON3URE-15"
+callsign = "ON3URE-11"
 #symbol = '/b' # bike
 #symbol = '/>' # car
 #symbol = '\>' # car
@@ -15,6 +15,6 @@ rate = 10 # seconds (packet frequency when moving)
 keepalive = 300 # in seconds (When no movement report every ...) when on solar/battary set this 900 (15 mins) else 300 (5 mins)
 distance = 100 # minimum distance change to report
 voltage = True # to measure voltage of the connected battery
-i2cEnabled = False
+i2cEnabled = True
 i2cDevices = ["BME680"]
 bme680_tempOffset = 0
