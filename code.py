@@ -1,21 +1,22 @@
+import binascii
 import time
+from math import atan2, ceil, cos, log, radians, sin, sqrt
+
+import adafruit_gps
+import adafruit_rfm9x
 import board
 import busio
-import adafruit_gps
-import digitalio
-import adafruit_rfm9x
-from analogio import AnalogIn
-import binascii
-from APRS import APRS
-import microcontroller
-from math import sin, cos, sqrt, atan2, radians, log, ceil
-import rtc
 import config
+import digitalio
+import microcontroller
+import rtc
+from analogio import AnalogIn
+from APRS import APRS
 from microcontroller import watchdog as w
 from watchdog import WatchDogMode
 
 # configure watchdog
-w.timeout=5
+w.timeout = 5
 w.mode = WatchDogMode.RESET
 w.feed()
 
@@ -24,45 +25,51 @@ time.sleep(2)
 w.feed()
 
 # our version
-VERSION = "RF.Guru_LoRaAPRStracker 0.1" 
+VERSION = "RF.Guru_LoRaAPRStracker 0.1"
 
 # read telemetry sequence (sleep when in RO)
-sequence=0
+sequence = 0
 try:
-    with open('/check', 'w') as f:
+    with open("/check", "w") as f:
         f.write("ok")
         f.close()
-    with open('/sequence', 'r') as f:
+    with open("/sequence", "r") as f:
         sequence = int(f.read())
         f.close()
 except:
-        print("RO filesystem, sleeping forever")
-        while True:
-            w.feed()
-            time.sleep(1)
+    print("RO filesystem, sleeping forever")
+    while True:
+        w.feed()
+        time.sleep(1)
+
 
 def _format_datetime(datetime):
-  return "{:02}/{:02}/{} {:02}:{:02}:{:02}".format(
-    datetime.tm_mon,
-    datetime.tm_mday,
-    datetime.tm_year,
-    datetime.tm_hour,
-    datetime.tm_min,
-    datetime.tm_sec,
-  )
+    return "{:02}/{:02}/{} {:02}:{:02}:{:02}".format(
+        datetime.tm_mon,
+        datetime.tm_mday,
+        datetime.tm_year,
+        datetime.tm_hour,
+        datetime.tm_min,
+        datetime.tm_sec,
+    )
+
 
 def year():
-  return int(time.localtime().tm_year)
+    return int(time.localtime().tm_year)
+
 
 def purple(data):
-  stamp = "{}".format(_format_datetime(time.localtime()))
-  return "\x1b[38;5;104m[" + str(stamp) + "] " + data + "\x1b[0m"
+    stamp = "{}".format(_format_datetime(time.localtime()))
+    return "\x1b[38;5;104m[" + str(stamp) + "] " + data + "\x1b[0m"
+
 
 def yellow(data):
-  return "\x1b[38;5;220m" + data + "\x1b[0m"
+    return "\x1b[38;5;220m" + data + "\x1b[0m"
+
 
 def red(data):
-  return "\x1b[1;5;31m -- " + data + "\x1b[0m"
+    return "\x1b[1;5;31m -- " + data + "\x1b[0m"
+
 
 # geometry distance calculator in meters
 def distance(lat1, lon1, lat2, lon2):
@@ -72,11 +79,11 @@ def distance(lat1, lon1, lat2, lon2):
 
     dlat = radians(lat2 - lat1)
     dlon = radians(lon2 - lon1)
-    a = (sin(dlat / 2) * sin(dlat / 2) +
-         cos(radians(lat1)) * cos(radians(lat2)) *
-         sin(dlon / 2) * sin(dlon / 2))
+    a = sin(dlat / 2) * sin(dlat / 2) + cos(radians(lat1)) * cos(radians(lat2)) * sin(
+        dlon / 2
+    ) * sin(dlon / 2)
     c = 2 * atan2(sqrt(a), sqrt(1 - a))
-    return int(round(radius * c * 1000,0)) 
+    return int(round(radius * c * 1000, 0))
 
 
 # voltage meter (12v/4v)
@@ -100,11 +107,11 @@ def base91_encode(number):
             quotient, number = divmod(number, 91**n)
             text.append(chr(33 + quotient))
 
-    text = "".join(text).lstrip('!')
+    text = "".join(text).lstrip("!")
     if len(text) == 1:
         text = "!" + text
-    
-    return text    
+
+    return text
 
 
 print(red(config.callsign + " -=- " + VERSION))
@@ -151,47 +158,107 @@ try:
 
     # Lora Module
     rfm9x = adafruit_rfm9x.RFM9x(spi, CS, RESET, RADIO_FREQ_MHZ, baudrate=1000000)
-    rfm9x.tx_power = config.power # 5 min 23 max
+    rfm9x.tx_power = config.power  # 5 min 23 max
 
     print(yellow("Init GPS"))
     # GPS Module (uart)
-    uart = busio.UART(board.GP4, board.GP5, baudrate=9600, timeout=10, receiver_buffer_size=1024)
-    gps = adafruit_gps.GPS(uart, debug=False) 
+    uart = busio.UART(
+        board.GP4, board.GP5, baudrate=9600, timeout=10, receiver_buffer_size=1024
+    )
+    gps = adafruit_gps.GPS(uart, debug=False)
 
     # Set GPS speed to 1HZ
-    Speed = bytes ([
-            0xB5,0x62,0x06,0x08,0x06,0x00,0xE8,0x03,0x01,0x00,0x01,0x00,0x01,0x39 #1Hz
-            #0xB5, 0x62, 0x06, 0x08, 0x06, 0x00, 0xC8, 0x00, 0x01, 0x00, 0x01, 0x00, 0xDE, 0x6A 5hz
-    ])
+    Speed = bytes(
+        [
+            0xB5,
+            0x62,
+            0x06,
+            0x08,
+            0x06,
+            0x00,
+            0xE8,
+            0x03,
+            0x01,
+            0x00,
+            0x01,
+            0x00,
+            0x01,
+            0x39,  # 1Hz
+            # 0xB5, 0x62, 0x06, 0x08, 0x06, 0x00, 0xC8, 0x00, 0x01, 0x00, 0x01, 0x00, 0xDE, 0x6A 5hz
+        ]
+    )
     gps.send_command(Speed)
     time.sleep(0.1)
 
     ## Disable UBX data
-    Disable_UBX = bytes ([
-            0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x12, 0xB9, #NAV-POSLLH
-            0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0x01, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x13, 0xC0, #NAV-STATUS
-            0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0x01, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x13, 0xC0, #NAV-STATUS
-    ])
+    Disable_UBX = bytes(
+        [
+            0xB5,
+            0x62,
+            0x06,
+            0x01,
+            0x08,
+            0x00,
+            0x01,
+            0x02,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x12,
+            0xB9,  # NAV-POSLLH
+            0xB5,
+            0x62,
+            0x06,
+            0x01,
+            0x08,
+            0x00,
+            0x01,
+            0x03,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x13,
+            0xC0,  # NAV-STATUS
+            0xB5,
+            0x62,
+            0x06,
+            0x01,
+            0x08,
+            0x00,
+            0x01,
+            0x03,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x13,
+            0xC0,  # NAV-STATUS
+        ]
+    )
     gps.send_command(Disable_UBX)
     time.sleep(0.1)
 
     print(yellow("Init Telemetry"))
 
-    # default telemetry        
-    aprsData = [
-        "PARM.Satelites",
-        "UNIT.Nr",
-        "EQNS.0,1,0" 
-    ]
+    # default telemetry
+    aprsData = ["PARM.Satelites", "UNIT.Nr", "EQNS.0,1,0"]
 
     # add voltage meter if present
     if config.voltage is True:
         for index, item in enumerate(aprsData):
-            if item.startswith('PARM'):
+            if item.startswith("PARM"):
                 aprsData[index] = aprsData[index] + ",Battery"
-            if item.startswith('UNIT'):
+            if item.startswith("UNIT"):
                 aprsData[index] = aprsData[index] + ",Vdc"
-            if item.startswith('EQNS'):
+            if item.startswith("EQNS"):
                 aprsData[index] = aprsData[index] + ",0,0.01,0"
 
     print(yellow("Init i2c Modules"))
@@ -201,32 +268,34 @@ try:
     # i2c
     if config.i2cEnabled is True:
         try:
-            #power on i2c
+            # power on i2c
             i2cPower.value = True
             time.sleep(1)
             i2c = busio.I2C(scl=board.GP7, sda=board.GP6)
             for idex, item in enumerate(config.i2cDevices):
-                if item.lower() is "shtc3":
+                if item.lower() == "shtc3":
                     for index, item in enumerate(aprsData):
-                        if item.startswith('PARM'):
+                        if item.startswith("PARM"):
                             aprsData[index] = aprsData[index] + ",Temperature,Humidity"
-                        if item.startswith('UNIT'):
+                        if item.startswith("UNIT"):
                             aprsData[index] = aprsData[index] + ",deg.C,%"
-                        if item.startswith('EQNS'):
+                        if item.startswith("EQNS"):
                             aprsData[index] = aprsData[index] + ",0,0.01,0,0,1,0"
                     import adafruit_shtc3
-                    i2c_shtc3 = adafruit_shtc3.SHTC3(i2c) 
+
+                    i2c_shtc3 = adafruit_shtc3.SHTC3(i2c)
                     shtc3 = True
                     print(yellow(">shtc loaded"))
-                if item.lower() is "bme680":
+                if item.lower() == "bme680":
                     for index, item in enumerate(aprsData):
-                        if item.startswith('PARM'):
+                        if item.startswith("PARM"):
                             aprsData[index] = aprsData[index] + ",Temperature,Humidity"
-                        if item.startswith('UNIT'):
+                        if item.startswith("UNIT"):
                             aprsData[index] = aprsData[index] + ",deg.C,%"
-                        if item.startswith('EQNS'):
+                        if item.startswith("EQNS"):
                             aprsData[index] = aprsData[index] + ",0,0.01,0,0,1,0"
                     import adafruit_bme680
+
                     i2c_bme680 = adafruit_bme680.Adafruit_BME680_I2C(i2c)
                     i2c_bme680.sea_level_pressure = 1015
                     bme680 = True
@@ -246,9 +315,12 @@ try:
             amp.value = True
             time.sleep(0.3)
         print(yellow("LoRa send message: " + message))
-        rfm9x.send(w,
-            bytes("{}".format("<"), "UTF-8") + binascii.unhexlify("FF") + binascii.unhexlify("01") +
-            bytes("{}".format(message), "UTF-8")
+        rfm9x.send(
+            w,
+            bytes("{}".format("<"), "UTF-8")
+            + binascii.unhexlify("FF")
+            + binascii.unhexlify("01")
+            + bytes("{}".format(message), "UTF-8"),
         )
         if config.hasPa is True:
             time.sleep(0.1)
@@ -295,12 +367,12 @@ try:
                 if gps_blink is False:
                     gps_blink = True
                 continue
-            
+
             # We have a fix!
             w.feed()
 
-            # epoch 
-            if year() is 1970:
+            # epoch
+            if year() == 1970:
                 rtc.set_time_source(gps)
                 the_rtc = rtc.RTC()
 
@@ -313,93 +385,145 @@ try:
 
             if gps_lock is False:
                 print(purple("We have a GPS fix && Clock is locked to GPS !)"))
-                print(purple("Location: LAT: " + str(gps.latitude) + " LON: " + str(gps.longitude)))
+                print(
+                    purple(
+                        "Location: LAT: "
+                        + str(gps.latitude)
+                        + " LON: "
+                        + str(gps.longitude)
+                    )
+                )
 
             gps_lock = True
             gpsLED.value = True
 
             angle = -1
             speed = -1
-            
+
             if gps.track_angle_deg is not None:
                 angle = gps.track_angle_deg
-                speed = gps.speed_knots*1.852 
-                
-            pos = aprs.makePosition(gps.latitude,gps.longitude,speed,angle,config.symbol)
+                speed = gps.speed_knots * 1.852
 
-            if ((time.time()-keepalive) >= config.keepalive):
+            pos = aprs.makePosition(
+                gps.latitude, gps.longitude, speed, angle, config.symbol
+            )
+
+            if (time.time() - keepalive) >= config.keepalive:
                 keepalive = time.time()
                 last_lat = None
                 last_lon = None
 
-            if ((time.time()-elapsed) >= config.rate or last_lon is None):
-                my_distance = distance(last_lat,last_lon,gps.latitude,gps.longitude)
+            if (time.time() - elapsed) >= config.rate or last_lon is None:
+                my_distance = distance(last_lat, last_lon, gps.latitude, gps.longitude)
                 if my_distance > int(config.distance):
                     elapsed = time.time()
                     last_lat = gps.latitude
                     last_lon = gps.longitude
-                            
-                    print(purple("Location: LAT: " + str(gps.latitude) + " LON: " + str(gps.longitude)))
 
-                    ts = aprs.makeTimestamp('z',gps.timestamp_utc.tm_mday,gps.timestamp_utc.tm_hour,gps.timestamp_utc.tm_min,gps.timestamp_utc.tm_sec)
+                    print(
+                        purple(
+                            "Location: LAT: "
+                            + str(gps.latitude)
+                            + " LON: "
+                            + str(gps.longitude)
+                        )
+                    )
+
+                    ts = aprs.makeTimestamp(
+                        "z",
+                        gps.timestamp_utc.tm_mday,
+                        gps.timestamp_utc.tm_hour,
+                        gps.timestamp_utc.tm_min,
+                        gps.timestamp_utc.tm_sec,
+                    )
 
                     # user comment
                     comment = config.comment
 
                     # telemetry
-                    sequence=sequence+1
+                    sequence = sequence + 1
                     if sequence > 8191:
                         sequence = 0
-                    comment = comment + "|" + base91_encode(sequence) + base91_encode(int(gps.satellites))
+                    comment = (
+                        comment
+                        + "|"
+                        + base91_encode(sequence)
+                        + base91_encode(int(gps.satellites))
+                    )
                     if config.voltage is True:
-                        bat_voltage = int(round(get_voltage(analog_in),2)*100)
+                        bat_voltage = int(round(get_voltage(analog_in), 2) * 100)
                         comment = comment + base91_encode(bat_voltage)
                     if shtc3 is True:
                         temperature, relative_humidity = i2c_shtc3.measurements
-                        temp = int(round(temperature,2)*100)
-                        hum = int(round(relative_humidity,0))
-                        # if shtc failes ... just reload 
+                        temp = int(round(temperature, 2) * 100)
+                        hum = int(round(relative_humidity, 0))
+                        # if shtc failes ... just reload
                         if hum is None:
-                            supervisor.reload()
+                            microcontroller.reset()
                         comment = comment + base91_encode(temp) + base91_encode(hum)
-                        print(purple("SHTC3: Temperature: " + str(temperature) + " Humidity: " + str(relative_humidity)))
+                        print(
+                            purple(
+                                "SHTC3: Temperature: "
+                                + str(temperature)
+                                + " Humidity: "
+                                + str(relative_humidity)
+                            )
+                        )
                     if bme680 is True:
-                        if skip1stbme680 is True: 
-                            print(purple("BME680: Skip first read to give BME some time to calibrate!"))
+                        if skip1stbme680 is True:
+                            print(
+                                purple(
+                                    "BME680: Skip first read to give BME some time to calibrate!"
+                                )
+                            )
                             temperature = i2c_bme680.temperature
                             relative_humidity = i2c_bme680.relative_humidity
                             skip1stbme680 = False
                         else:
-                            temperature = i2c_bme680.temperature + config.bme680_tempOffset
+                            temperature = (
+                                i2c_bme680.temperature + config.bme680_tempOffset
+                            )
                             relative_humidity = i2c_bme680.relative_humidity
-                            temp = int(round(temperature,2)*100)
-                            hum = int(round(relative_humidity,0))
+                            temp = int(round(temperature, 2) * 100)
+                            hum = int(round(relative_humidity, 0))
                             comment = comment + base91_encode(temp) + base91_encode(hum)
-                            print(purple("BME680: Temperature: " + str(temperature) + " Humidity: " + str(relative_humidity)))
+                            print(
+                                purple(
+                                    "BME680: Temperature: "
+                                    + str(temperature)
+                                    + " Humidity: "
+                                    + str(relative_humidity)
+                                )
+                            )
                     comment = comment + "|"
 
                     # altitude
                     if gps.altitude_m is not None:
-                        altitude = "/A={:06d}".format(int(gps.altitude_m*3.2808399))
+                        altitude = "/A={:06d}".format(int(gps.altitude_m * 3.2808399))
                         comment = comment + altitude
                         print(purple("GPS Altitude: " + str(gps.altitude_m) + " m"))
 
-                    # send LoRa packet 
-                    message = "{}>APRFGT:@{}{}{}".format(config.callsign, ts, pos, comment)
+                    # send LoRa packet
+                    message = "{}>APRFGT:@{}{}{}".format(
+                        config.callsign, ts, pos, comment
+                    )
                     loraLED.value = True
                     if config.hasPa is True:
                         amp.value = True
                         time.sleep(0.3)
                     print(purple("LoRa send message: " + message))
-                    rfm9x.send(w,
-                        bytes("{}".format("<"), "UTF-8") + binascii.unhexlify("FF") + binascii.unhexlify("01") +
-                        bytes("{}".format(message), "UTF-8")
+                    rfm9x.send(
+                        w,
+                        bytes("{}".format("<"), "UTF-8")
+                        + binascii.unhexlify("FF")
+                        + binascii.unhexlify("01")
+                        + bytes("{}".format(message), "UTF-8"),
                     )
                     if config.hasPa is True:
                         time.sleep(0.1)
                         amp.value = False
                     loraLED.value = False
-                    with open('/sequence', 'w') as f:
+                    with open("/sequence", "w") as f:
                         print(purple("Update Sequence: " + str(sequence)))
                         f.write(str(sequence))
                         f.close()
