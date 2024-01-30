@@ -280,7 +280,7 @@ try:
                         if item.startswith("UNIT"):
                             aprsData[index] = aprsData[index] + ",deg.C,%"
                         if item.startswith("EQNS"):
-                            aprsData[index] = aprsData[index] + ",0,0.01,0,0,1,0"
+                            aprsData[index] = aprsData[index] + ",0,0.02,-50,0,1,0"
                     import adafruit_shtc3
 
                     i2c_shtc3 = adafruit_shtc3.SHTC3(i2c)
@@ -293,7 +293,7 @@ try:
                         if item.startswith("UNIT"):
                             aprsData[index] = aprsData[index] + ",deg.C,%"
                         if item.startswith("EQNS"):
-                            aprsData[index] = aprsData[index] + ",0,0.01,0,0,1,0"
+                            aprsData[index] = aprsData[index] + ",0,0.02,-50,0,1,0"
                     import adafruit_bme680
 
                     i2c_bme680 = adafruit_bme680.Adafruit_BME680_I2C(i2c)
@@ -455,7 +455,7 @@ try:
                         comment = comment + base91_encode(bat_voltage)
                     if shtc3 is True:
                         temperature, relative_humidity = i2c_shtc3.measurements
-                        temp = int(round(temperature, 2) * 100)
+                        temp = int((round(temperature / 2, 2) + 25) * 100)
                         hum = int(round(relative_humidity, 0))
                         # if shtc failes ... just reload
                         if hum is None:
@@ -484,7 +484,7 @@ try:
                                 i2c_bme680.temperature + config.bme680_tempOffset
                             )
                             relative_humidity = i2c_bme680.relative_humidity
-                            temp = int(round(temperature, 2) * 100)
+                            temp = int((round(temperature / 2, 2) + 25) * 100)
                             hum = int(round(relative_humidity, 0))
                             comment = comment + base91_encode(temp) + base91_encode(hum)
                             print(
