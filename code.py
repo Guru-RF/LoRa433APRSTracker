@@ -121,7 +121,7 @@ except:
     while file_or_dir_exists("/ro"):
         w.feed()
         time.sleep(1)
-    print(yellow("rebooting ..."))
+    print(yellow("rebooting into normal operation mode..."))
     time.sleep(1)
     w.feed()
     microcontroller.reset()
@@ -135,6 +135,11 @@ while time.time() < t_end:
         with open("/ro", "w") as f:
             f.write("ok")
             f.close()
+        print(
+            yellow(
+                "rebooting into configuration mode, usb disk will popup after rebooting ..."
+            )
+        )
         microcontroller.reset()
 
 
