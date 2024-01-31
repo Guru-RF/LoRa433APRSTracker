@@ -1,4 +1,5 @@
 import binascii
+import os
 import time
 from math import atan2, ceil, cos, log, radians, sin, sqrt
 
@@ -10,6 +11,7 @@ import config
 import digitalio
 import microcontroller
 import rtc
+import usb_cdc
 from analogio import AnalogIn
 from APRS import APRS
 from microcontroller import watchdog as w
@@ -20,38 +22,13 @@ w.timeout = 5
 w.mode = WatchDogMode.RESET
 w.feed()
 
-# wait for console()
-time.sleep(2)
-w.feed()
 
-# our version
-VERSION = "RF.Guru_LoRaAPRStracker 0.1"
-
-# read telemetry sequence (sleep when in RO)
-sequence = 0
-try:
-    with open("/check", "w") as f:
-        f.write("ok")
-        f.close()
-    with open("/sequence", "r") as f:
-        sequence = int(f.read())
-        f.close()
-except:
-    print("RO filesystem, sleeping forever")
-    while True:
-        w.feed()
-        time.sleep(1)
-
-
-def _format_datetime(datetime):
-    return "{:02}/{:02}/{} {:02}:{:02}:{:02}".format(
-        datetime.tm_mon,
-        datetime.tm_mday,
-        datetime.tm_year,
-        datetime.tm_hour,
-        datetime.tm_min,
-        datetime.tm_sec,
-    )
+def file_or_dir_exists(filename):
+    try:
+        os.stat(filename)
+        return True
+    except OSError:
+        return False
 
 
 def year():
@@ -112,6 +89,64 @@ def base91_encode(number):
         text = "!" + text
 
     return text
+
+
+# serial input
+serial = usb_cdc.data
+
+# wait for console()
+time.sleep(2)
+w.feed()
+
+# our version
+VERSION = "RF.Guru_LoRaAPRStracker 0.1"
+
+# read telemetry sequence (sleep when in RO)
+sequence = 0
+try:
+    with open("/check", "w") as f:
+        f.write("ok")
+        f.close()
+    with open("/sequence", "r") as f:
+        sequence = int(f.read())
+        f.close()
+except:
+    w.feed()
+    time.sleep(1)
+    print(
+        yellow(
+            "In configure mode, usb disk is present, sleeping until /APRSTRKR/ro is removed"
+        )
+    )
+    while file_or_dir_exists("/ro"):
+        w.feed()
+        time.sleep(1)
+    print(yellow("rebooting ..."))
+    time.sleep(1)
+    w.feed()
+    microcontroller.reset()
+
+
+print(yellow("Press any key for configuration mode (enables usb disk drive)"))
+t_end = time.time() + 5
+while time.time() < t_end:
+    w.feed()
+    if serial.in_waiting > 0:
+        with open("/ro", "w") as f:
+            f.write("ok")
+            f.close()
+        microcontroller.reset()
+
+
+def _format_datetime(datetime):
+    return "{:02}/{:02}/{} {:02}:{:02}:{:02}".format(
+        datetime.tm_mon,
+        datetime.tm_mday,
+        datetime.tm_year,
+        datetime.tm_hour,
+        datetime.tm_min,
+        datetime.tm_sec,
+    )
 
 
 print(red(config.callsign + " -=- " + VERSION))

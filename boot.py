@@ -1,8 +1,22 @@
-import usb_cdc
-import board
-import storage
+import os
 import time
+
+import board
 import digitalio
+import storage
+import supervisor
+import usb_cdc
+
+supervisor.runtime.autoreload = False
+
+
+def file_or_dir_exists(filename):
+    try:
+        os.stat(filename)
+        return True
+    except OSError:
+        return False
+
 
 # configure LEDs
 pwrLED = digitalio.DigitalInOut(board.GP9)
@@ -30,28 +44,20 @@ time.sleep(1)
 gpsRST.value = True
 time.sleep(1)
 
-btn = digitalio.DigitalInOut(board.GP6)
-btn.direction = digitalio.Direction.INPUT
-btn.pull = digitalio.Pull.UP
-
-btn2 = digitalio.DigitalInOut(board.GP15)
-btn2.direction = digitalio.Direction.INPUT
-btn2.pull = digitalio.Pull.UP
-
 # Disable devices only if dah/dit is not pressed.
-if btn.value is True and btn2.value is True:
-    print(f"boot: button not pressed, disabling drive")
-    storage.disable_usb_drive()
-    storage.remount("/", readonly=False)
+if file_or_dir_exists("/ro"):
+    print("boot: ro file exists enabling drive")
 
-    usb_cdc.enable(console=True, data=False)
-else:
-    print(f"boot: button pressed, enable console, enabling drive")
-
-    usb_cdc.enable(console=True, data=False)
+    usb_cdc.enable(console=True, data=True)
 
     new_name = "APRSTRKR"
     storage.remount("/", readonly=False)
     m = storage.getmount("/")
     m.label = new_name
     storage.remount("/", readonly=True)
+else:
+    print("boot: ro file not there, disabling drive")
+    storage.disable_usb_drive()
+    storage.remount("/", readonly=False)
+
+    usb_cdc.enable(console=True, data=True)
