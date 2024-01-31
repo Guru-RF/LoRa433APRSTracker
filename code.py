@@ -11,11 +11,15 @@ import config
 import digitalio
 import microcontroller
 import rtc
+import supervisor
 import usb_cdc
 from analogio import AnalogIn
 from APRS import APRS
 from microcontroller import watchdog as w
 from watchdog import WatchDogMode
+
+# stop autoreloading
+supervisor.runtime.autoreload = False
 
 # configure watchdog
 w.timeout = 5
@@ -23,10 +27,18 @@ w.mode = WatchDogMode.RESET
 w.feed()
 
 
+def cleanup():
+    try:
+        os.unlink("/check")
+        os.unlink("/ro")
+        return True
+    except OSError:
+        return True
+
+
 def file_or_dir_exists(filename):
     try:
-        os.stat(filename)
-        return True
+        return os.stat(filename)
     except OSError:
         return False
 
@@ -95,7 +107,7 @@ def base91_encode(number):
 serial = usb_cdc.data
 
 # wait for console()
-time.sleep(2)
+time.sleep(3)
 w.feed()
 
 # our version
@@ -110,36 +122,47 @@ try:
     with open("/sequence", "r") as f:
         sequence = int(f.read())
         f.close()
+    cleanup()
 except:
     w.feed()
     time.sleep(1)
     print(
         yellow(
-            "In configure mode, usb disk is present, sleeping until /APRSTRKR/ro is removed"
+            "In configure mode, usb disk is present for editing, remove file ro for normal mode !!"
         )
     )
-    while file_or_dir_exists("/ro"):
+    print(yellow("Sleep until hard reset (unplug and replug power)"))
+    while True:
         w.feed()
-        time.sleep(1)
-    print(yellow("rebooting into normal operation mode..."))
-    time.sleep(1)
-    w.feed()
-    microcontroller.reset()
 
-
-print(yellow("Press any key for configuration mode (enables usb disk drive)"))
+print(
+    yellow("Press f key for rp2040 firmware upgrade (enables usb firmware disk drive)")
+)
+print(yellow("Press any other key for configuration mode (enables usb disk drive)"))
 t_end = time.time() + 5
 while time.time() < t_end:
     w.feed()
     if serial.in_waiting > 0:
+        letter = serial.read().decode("utf-8")
+        if letter == "f":
+            print(
+                yellow(
+                    "Rebooting into firmware mode, usb firmware disk will popup after rebooting ..."
+                )
+            )
+            time.sleep(1)
+            microcontroller.on_next_reset(microcontroller.RunMode.UF2)
+            microcontroller.reset()
         with open("/ro", "w") as f:
             f.write("ok")
             f.close()
+        print()
         print(
             yellow(
-                "rebooting into configuration mode, usb disk will popup after rebooting ..."
+                "Rebooting into configuration mode, usb disk will popup after rebooting ..."
             )
         )
+        time.sleep(1)
         microcontroller.reset()
 
 
