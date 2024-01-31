@@ -132,13 +132,27 @@ except:
         )
     )
     print(yellow("Sleep until hard reset (unplug and replug power)"))
+    serial.write(
+        str.encode(
+            "In configure mode, usb disk is present for editing, remove file ro for normal mode !!\r\n\r\nSleep until hard reset (unplug and replug power)\r\n\r\n"
+        )
+    )
     while True:
         w.feed()
 
-print(
-    yellow("Press f key for rp2040 firmware upgrade (enables usb firmware disk drive)")
-)
-print(yellow("Press any other key for configuration mode (enables usb disk drive)"))
+print(yellow("Use other serial port for firemware and configuration mode !"))
+if serial is not None:
+    if serial.connected:
+        serial.write(
+            str.encode(
+                "Press f key for rp2040 firmware upgrade (enables usb firmware disk drive)\r\n\r\n"
+            )
+        )
+        serial.write(
+            str.encode(
+                "Press any other key for configuration mode (enables usb disk drive)\r\n\r\n"
+            )
+        )
 t_end = time.time() + 5
 while time.time() < t_end:
     w.feed()
@@ -148,6 +162,11 @@ while time.time() < t_end:
             print(
                 yellow(
                     "Rebooting into firmware mode, usb firmware disk will popup after rebooting ..."
+                )
+            )
+            serial.write(
+                str.encode(
+                    "Rebooting into firmware mode, usb firmware disk will popup after rebooting ...\r\n"
                 )
             )
             time.sleep(1)
@@ -160,6 +179,11 @@ while time.time() < t_end:
         print(
             yellow(
                 "Rebooting into configuration mode, usb disk will popup after rebooting ..."
+            )
+        )
+        serial.write(
+            str.encode(
+                "Rebooting into configuration mode, usb disk will popup after rebooting ...\r\n"
             )
         )
         time.sleep(1)
