@@ -18,12 +18,13 @@ fi
 DIR="/Volumes/CIRCUITPY"
 if [ -d "$DIR" ]; then
   echo "Install software in ${DIR}..."
-  cp -r lib /Volumes/CIRCUITPY
-  cp *.py /Volumes/CIRCUITPY
+  cp -r src/lib /Volumes/CIRCUITPY
+  cp src/boot.py /Volumes/CIRCUITPY
   echo "1" > /Volumes/CIRCUITPY/sequence
-  cp config.py /tmp
+  cp src/config.py /tmp
   perl -i -pe "s/--CALL--/${args[0]}/g" /tmp/config.py
   cp -f /tmp/config.py /Volumes/CIRCUITPY
+  cp src/code.py /Volumes/CIRCUITPY
   sync
   diskutil unmount /Volumes/CIRCUITPY
   echo "done"
@@ -34,11 +35,9 @@ if [ -d "$DIR" ]; then
   echo "Updating software in ${DIR}..."
   unlink /Volumes/APRSTRKR/ro
   sync
-  cp -r lib /Volumes/APRSTRKR
-  cp *.py /Volumes/APRSTRKR
-  cp config.py /tmp
-  perl -i -pe "s/--CALL--/${args[0]}/g" /tmp/config.py
-  cp -f /tmp/config.py /Volumes/APRSTRKR
+  cp -r src/lib /Volumes/APRSTRKR
+  cp src/boot.py /Volumes/APRSTRKR
+  cp src/code.py /Volumes/APRSTRKR
   sync
   diskutil unmount /Volumes/APRSTRKR
   echo "done"
