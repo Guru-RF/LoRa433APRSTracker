@@ -161,12 +161,12 @@ while time.time() < t_end:
         if letter == "f":
             print(
                 yellow(
-                    "Rebooting into firmware mode, usb firmware disk will popup after rebooting ..."
+                    "Reboot into firmware mode, usb firmware disk will popup after reboot ..."
                 )
             )
             serial.write(
                 str.encode(
-                    "Rebooting into firmware mode, usb firmware disk will popup after rebooting ...\r\n"
+                    "Reboot into firmware mode, usb firmware disk will popup after reboot ...\r\n"
                 )
             )
             time.sleep(1)
@@ -178,16 +178,34 @@ while time.time() < t_end:
         print()
         print(
             yellow(
-                "Rebooting into configuration mode, usb disk will popup after rebooting ..."
+                "Reboot into configuration mode, usb disk will popup after reboot ..."
             )
         )
         serial.write(
             str.encode(
-                "Rebooting into configuration mode, usb disk will popup after rebooting ...\r\n"
+                "Reboot into configuration mode, usb disk will popup after reboot ...\r\n"
             )
         )
         time.sleep(1)
         microcontroller.reset()
+
+if config.callsign == "":
+    with open("/ro", "w") as f:
+        f.write("ok")
+        f.close()
+    print()
+    print(
+        yellow(
+            "No callsign defined in config file reboot into configuration mode, usb disk will popup after reboot ..."
+        )
+    )
+    serial.write(
+        str.encode(
+            "Reboot into configuration mode, usb disk will popup after reboot ...\r\n"
+        )
+    )
+    time.sleep(1)
+    microcontroller.reset()
 
 
 def _format_datetime(datetime):
@@ -347,13 +365,31 @@ try:
                 aprsData[index] = aprsData[index] + ",Vdc"
             if item.startswith("EQNS"):
                 aprsData[index] = aprsData[index] + ",0,0.01,0"
+    else:
+        for index, item in enumerate(aprsData):
+            if item.startswith("PARM"):
+                aprsData[index] = aprsData[index] + ","
+            if item.startswith("UNIT"):
+                aprsData[index] = aprsData[index] + ","
+            if item.startswith("EQNS"):
+                aprsData[index] = aprsData[index] + ",0,0,0"
 
-    print(yellow("Init i2c Modules"))
-    # i2c modules
+    # i2c
     shtc3 = False
     bme680 = False
-    # i2c
-    if config.i2cEnabled is True:
+    # disable extra telemetry fields if no i2c
+    if config.i2cEnabled is False:
+        for index, item in enumerate(aprsData):
+            if item.startswith("PARM"):
+                aprsData[index] = aprsData[index] + ",,"
+            if item.startswith("UNIT"):
+                aprsData[index] = aprsData[index] + ",,"
+            if item.startswith("EQNS"):
+                aprsData[index] = aprsData[index] + ",0,0,0,0,0,0"
+    else:
+        print(yellow("Init i2c Modules"))
+        # i2c modules
+
         try:
             # power on i2c
             i2cPower.value = True
@@ -431,7 +467,7 @@ try:
         try:
             gps.update()
         except MemoryError:
-            print(yellow("Memory Leak !!! rebooting ..."))
+            print(yellow("Memory Leak !!! Reboot ..."))
             # the gps module has a nasty memory leak just ignore and reload (Gps trackings stays in tact)
             microcontroller.reset()
 
@@ -537,9 +573,8 @@ try:
                         + base91_encode(sequence)
                         + base91_encode(int(gps.satellites))
                     )
-                    if config.voltage is True:
-                        bat_voltage = int(round(get_voltage(analog_in), 2) * 100)
-                        comment = comment + base91_encode(bat_voltage)
+                    bat_voltage = int(round(get_voltage(analog_in), 2) * 100)
+                    comment = comment + base91_encode(bat_voltage)
                     if shtc3 is True:
                         temperature, relative_humidity = i2c_shtc3.measurements
                         temp = int((round(temperature / 2, 2) + 25) * 100)

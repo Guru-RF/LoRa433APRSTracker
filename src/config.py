@@ -14,7 +14,6 @@ comment = "https://RF.Guru"
 rate = 10  # seconds (packet frequency when moving)
 keepalive = 300  # in seconds (When no movement report every ...) when on solar/battary set this 900 (15 mins) else 300 (5 mins)
 distance = 100  # minimum distance change to report
-voltage = True  # to measure voltage of the connected battery
 i2cEnabled = False
 i2cDevices = ["BME680"]
 bme680_tempOffset = 0

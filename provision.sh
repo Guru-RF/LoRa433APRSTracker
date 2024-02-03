@@ -2,6 +2,11 @@
 
 args=("$@")
 
+if [ -z "${args[0]}" ]; then
+  echo "Please provide a callsign"
+  exit 1
+fi
+
 
 DIR="/Volumes/RPI-RP2"
 if [ -d "$DIR" ]; then
