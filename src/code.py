@@ -16,6 +16,7 @@ import usb_cdc
 from analogio import AnalogIn
 from APRS import APRS
 from microcontroller import watchdog as w
+from rfguru_nvm import NonVolatileMemory
 from watchdog import WatchDogMode
 
 # stop autoreloading
@@ -113,99 +114,23 @@ w.feed()
 # our version
 VERSION = "RF.Guru_LoRaAPRStracker 0.1"
 
-# read telemetry sequence (sleep when in RO)
+# read telemetry sequence
+nvm = NonVolatileMemory()
 sequence = 0
-try:
-    with open("/check", "w") as f:
-        f.write("ok")
-        f.close()
-    with open("/sequence", "r") as f:
-        sequence = int(f.read())
-        f.close()
-    cleanup()
-except:
-    w.feed()
-    time.sleep(1)
-    print(
-        yellow(
-            "In configure mode, usb disk is present for editing, remove file ro for normal mode !!"
-        )
-    )
-    print(yellow("Sleep until hard reset (unplug and replug power)"))
-    serial.write(
-        str.encode(
-            "In configure mode, usb disk is present for editing, remove file ro for normal mode !!\r\n\r\nSleep until hard reset (unplug and replug power)\r\n\r\n"
-        )
-    )
-    while True:
-        w.feed()
+read_data = int(nvm.read_data())
+if read_data > 0:
+    sequence = read_data
+elif read_data > 8191:
+    nvm.save_data(0)
+else:
+    nvm.save_data(0)
 
-print(yellow("Use other serial port for firemware and configuration mode !"))
-if serial is not None:
-    if serial.connected:
-        serial.write(
-            str.encode(
-                "Press f key for rp2040 firmware upgrade (enables usb firmware disk drive)\r\n\r\n"
-            )
-        )
-        serial.write(
-            str.encode(
-                "Press any other key for configuration mode (enables usb disk drive)\r\n\r\n"
-            )
-        )
-t_end = time.time() + 5
-while time.time() < t_end:
-    w.feed()
-    if serial.in_waiting > 0:
-        letter = serial.read().decode("utf-8")
-        if letter == "f":
-            print(
-                yellow(
-                    "Reboot into firmware mode, usb firmware disk will popup after reboot ..."
-                )
-            )
-            serial.write(
-                str.encode(
-                    "Reboot into firmware mode, usb firmware disk will popup after reboot ...\r\n"
-                )
-            )
-            time.sleep(1)
-            microcontroller.on_next_reset(microcontroller.RunMode.UF2)
-            microcontroller.reset()
-        with open("/ro", "w") as f:
-            f.write("ok")
-            f.close()
-        print()
-        print(
-            yellow(
-                "Reboot into configuration mode, usb disk will popup after reboot ..."
-            )
-        )
-        serial.write(
-            str.encode(
-                "Reboot into configuration mode, usb disk will popup after reboot ...\r\n"
-            )
-        )
-        time.sleep(1)
-        microcontroller.reset()
 
 if config.callsign == "":
-    with open("/ro", "w") as f:
-        f.write("ok")
-        f.close()
-    print()
-    print(
-        yellow(
-            "No callsign defined in config file reboot into configuration mode, usb disk will popup after reboot ..."
-        )
-    )
-    serial.write(
-        str.encode(
-            "Reboot into configuration mode, usb disk will popup after reboot ...\r\n"
-        )
-    )
-    time.sleep(1)
-    microcontroller.reset()
+    print(yellow("No callsign defined in config file modify and reboot !"))
+    while True:
+        w.feed()
+        time.sleep(1)
 
 
 def _format_datetime(datetime):
@@ -221,6 +146,7 @@ def _format_datetime(datetime):
 
 print(red(config.callsign + " -=- " + VERSION))
 
+print(yellow("Sequence: " + str(sequence)))
 print(yellow("Init PINs"))
 
 # voltage adc
@@ -645,10 +571,7 @@ try:
                         time.sleep(0.1)
                         amp.value = False
                     loraLED.value = False
-                    with open("/sequence", "w") as f:
-                        print(purple("Update Sequence: " + str(sequence)))
-                        f.write(str(sequence))
-                        f.close()
+                    nvm.save_data(sequence)
             time.sleep(0.1)
 except Exception as error:
     print("Tracking err reloading: ", error)

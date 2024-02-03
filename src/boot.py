@@ -44,20 +44,10 @@ time.sleep(1)
 gpsRST.value = True
 time.sleep(1)
 
-# Disable devices only if dah/dit is not pressed.
-if file_or_dir_exists("/ro"):
-    print("boot: ro file exists enabling drive")
+usb_cdc.enable(console=True, data=False)
 
-    usb_cdc.enable(console=True, data=True)
-
-    new_name = "APRSTRKR"
-    storage.remount("/", readonly=False)
-    m = storage.getmount("/")
-    m.label = new_name
-    storage.remount("/", readonly=True)
-else:
-    print("boot: ro file not there, disabling drive")
-    storage.disable_usb_drive()
-    storage.remount("/", readonly=False)
-
-    usb_cdc.enable(console=True, data=True)
+new_name = "APRSTRKR"
+storage.remount("/", readonly=False)
+m = storage.getmount("/")
+m.label = new_name
+storage.remount("/", readonly=True)
