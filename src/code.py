@@ -117,12 +117,15 @@ VERSION = "RF.Guru_LoRaAPRStracker 0.1"
 # read telemetry sequence
 nvm = NonVolatileMemory()
 sequence = 0
-read_data = int(nvm.read_data())
-if read_data > 0:
-    sequence = read_data
-elif read_data > 8191:
-    nvm.save_data(0)
-else:
+try:
+    read_data = int(nvm.read_data())
+    if read_data > 0:
+        sequence = read_data
+    elif read_data > 8191:
+        nvm.save_data(0)
+    else:
+        nvm.save_data(0)
+except EOFError:
     nvm.save_data(0)
 
 
