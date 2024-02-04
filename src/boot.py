@@ -1,4 +1,3 @@
-import os
 import time
 
 import board
@@ -9,14 +8,7 @@ import usb_cdc
 
 supervisor.runtime.autoreload = False
 
-
-def file_or_dir_exists(filename):
-    try:
-        os.stat(filename)
-        return True
-    except OSError:
-        return False
-
+supervisor.set_usb_identification("RF.Guru", "APRSTRKR")
 
 # configure LEDs
 pwrLED = digitalio.DigitalInOut(board.GP9)
