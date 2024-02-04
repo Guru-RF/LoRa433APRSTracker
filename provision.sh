@@ -7,6 +7,10 @@ if [ -z "${args[0]}" ]; then
   exit 1
 fi
 
+if ! ([ "${args[1]}" = "False" ] || [ "${args[1]}" = "True"  ]); then
+  echo "Please provide a True/False for i2c"
+  exit 1
+fi
 
 DIR="/Volumes/RPI-RP2"
 if [ -d "$DIR" ]; then
@@ -28,8 +32,10 @@ if [ -d "$DIR" ]; then
   echo "1" > /Volumes/CIRCUITPY/sequence
   cp src/config.py /tmp
   perl -i -pe "s/--CALL--/${args[0]}/g" /tmp/config.py
+  perl -i -pe "s/--BOOL--/${args[1]}/g" /tmp/config.py
   cp -f /tmp/config.py /Volumes/CIRCUITPY
   cp src/code.py /Volumes/CIRCUITPY
+  rm -f /tmp/config.py
   sync
   diskutil unmount /Volumes/CIRCUITPY
   echo "done"
