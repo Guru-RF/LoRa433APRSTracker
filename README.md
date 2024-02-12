@@ -1,6 +1,6 @@
 # LoRA APRS Tracker Automotive 13.8v
 
-[RF.Guru LoRA APRS Tracker Automotive 433Mhz](https://rf.guru/2023-k-521) 1/2W Power
+[RF.Guru LoRA APRS Tracker Automotive 433Mhz](https://shop.rf.guru/products/2023-pa-521) 512mW Power
 
 # Installation procedure #
 Connect the device to our computer using a UBC-C cable; a drive labeled 'RPI-RP2' will appear. 
