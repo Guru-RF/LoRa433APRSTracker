@@ -112,7 +112,7 @@ time.sleep(3)
 w.feed()
 
 # our version
-VERSION = "RF.Guru_LoRaAPRStracker 0.1"
+VERSION = "RF.Guru_LoRa433APRSTracker 0.2"
 
 # read telemetry sequence
 nvm = NonVolatileMemory()
@@ -322,7 +322,9 @@ try:
         try:
             # power on i2c
             i2cPower.value = True
-            time.sleep(1)
+            w.feed()
+            time.sleep(2)
+            w.feed()
             i2c = busio.I2C(scl=board.GP7, sda=board.GP6)
             for idex, item in enumerate(config.i2cDevices):
                 if item.lower() == "shtc3":
@@ -354,9 +356,10 @@ try:
                     print(yellow(">bme680 loaded"))
         except Exception as error:
             i2cPower.value = False
-            print("I2C err reloading: ", error)
-            time.sleep(1)
-            microcontroller.reset()
+            print("I2C Error: ", error)
+            while True:
+                w.feed()
+                time.sleep(1)
 
     print(yellow("Send Telemetry MetaDATA"))
     # send telemetry metadata once
