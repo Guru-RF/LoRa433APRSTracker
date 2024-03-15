@@ -135,6 +135,9 @@ if config.callsign == "":
         w.feed()
         time.sleep(1)
 
+# convert to upper
+config.callsign = config.callsign.upper()
+
 
 def _format_datetime(datetime):
     return "{:02}/{:02}/{} {:02}:{:02}:{:02}".format(
