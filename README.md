@@ -9,7 +9,7 @@ Connect the device to our computer using a UBC-C cable; a drive labeled 'RPI-RP2
 
 [Download the code](https://github.com/Guru-RF/LoRa433APRSTracker/archive/refs/heads/main.zip)
 
-Copy the 'adafruit-circuitpython-raspberry_pi_pico-en_US-8.2.9.uf2' file to the drive and patiently wait for it to reboot! 
+Copy the 'adafruit-circuitpython-raspberry_pi_pico-en_US-9.?.uf2' file to the drive and patiently wait for it to reboot! 
 
 Once it restarts, you should see a new drive named 'CIRCUITPY' 
 
