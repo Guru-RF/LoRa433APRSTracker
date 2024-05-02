@@ -38,7 +38,7 @@ tio --auto-connect latest
 tio /dev/tty....
 ```
 
-![console cast](https://github.com/Guru-RF/LoRa433APRSTracker/assets/1251767/af0a7d53-4ce5-42ed-8564-f2e9548bac6c)
+![console cast](https://github.com/Guru-RF/LoRa433APRSTracker/assets/1251767/6fd05385-3f13-4b30-8b80-1ce499a2039c)
 
 # Resetting to factory defaults
 
