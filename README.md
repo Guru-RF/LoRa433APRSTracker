@@ -22,6 +22,37 @@ Finally, transfer the src/code.py file!
 <img width="938" alt="TrackerTOP" src="https://github.com/Guru-RF/LoraAPRStracker/assets/1251767/c3a32cc5-92fe-420b-a335-53400f411a51">
 <img width="1076" alt="TrackerBottom" src="https://github.com/Guru-RF/LoraAPRStracker/assets/1251767/2ef5376d-9d41-4aac-892e-fea3d2fedd85">
 
+# Serial Debugging/Console (TIO)
+
+First install tio [https://github.com/tio/tio](https://github.com/tio/tio)
+
+```console
+tio --auto-connect new
+```
+
+```console
+tio --auto-connect latest
+```
+
+# Resetting to factory defaults
+
+Via the console ... press control-c and past this
+
+```console
+import microcontroller
+microcontroller.on_next_reset(microcontroller.RunMode.UF2)
+microcontroller.reset()
+```
+
+Follow the installation procedure on top of this page !
+
+# Reset by hand
+
+As a last restort !
+Open the device ... press the tiny reset button on the pcb and connect usb-c cable whilst pressing the reset button.
+
+Follow the installation procedure on top of this page !
+
 # Remarks
 
 lib/adafruit_rfm9x.mpy is heavily modified to work with loraAPRS
