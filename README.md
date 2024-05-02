@@ -36,6 +36,7 @@ tio --auto-connect latest
 
 ```console
 tio /dev/tty....
+```
 
 ![console cast](https://github.com/Guru-RF/LoRa433APRSTracker/assets/1251767/af0a7d53-4ce5-42ed-8564-f2e9548bac6c)
 
