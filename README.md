@@ -1,4 +1,4 @@
-![console cast](https://github.com/Guru-RF/LoRa433APRSTracker/assets/1251767/9bcc6d71-46d9-40a1-86c3-337bbb93e6df)# LoRA APRS Tracker Automotive 13.8v
+# LoRA APRS Tracker Automotive 13.8v
 
 [Assembled - RF.Guru LoRA APRS Tracker Automotive 433Mhz](https://shop.rf.guru/products/2023-pa-521) 512mW Power
 
@@ -38,7 +38,7 @@ tio --auto-connect latest
 tio /dev/tty....
 ```
 
-![Uploading console.svg…]()
+![console cast](https://github.com/Guru-RF/LoRa433APRSTracker/assets/1251767/9bcc6d71-46d9-40a1-86c3-337bbb93e6df)
 
 # Resetting to factory defaults
 
