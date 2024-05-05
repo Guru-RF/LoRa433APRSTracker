@@ -7,7 +7,6 @@ import adafruit_gps
 import adafruit_rfm9x
 import board
 import busio
-import config
 import digitalio
 import microcontroller
 import rtc
@@ -18,6 +17,8 @@ from APRS import APRS
 from microcontroller import watchdog as w
 from rfguru_nvm import NonVolatileMemory
 from watchdog import WatchDogMode
+
+import config
 
 # stop autoreloading
 supervisor.runtime.autoreload = False
@@ -297,28 +298,12 @@ try:
                 aprsData[index] = aprsData[index] + ",Vdc"
             if item.startswith("EQNS"):
                 aprsData[index] = aprsData[index] + ",0,0.01,0"
-    else:
-        for index, item in enumerate(aprsData):
-            if item.startswith("PARM"):
-                aprsData[index] = aprsData[index] + ","
-            if item.startswith("UNIT"):
-                aprsData[index] = aprsData[index] + ","
-            if item.startswith("EQNS"):
-                aprsData[index] = aprsData[index] + ",0,0,0"
 
     # i2c
     shtc3 = False
     bme680 = False
     # disable extra telemetry fields if no i2c
-    if config.i2cEnabled is False:
-        for index, item in enumerate(aprsData):
-            if item.startswith("PARM"):
-                aprsData[index] = aprsData[index] + ",,"
-            if item.startswith("UNIT"):
-                aprsData[index] = aprsData[index] + ",,"
-            if item.startswith("EQNS"):
-                aprsData[index] = aprsData[index] + ",0,0,0,0,0,0"
-    else:
+    if config.i2cEnabled is True:
         print(yellow("Init i2c Modules"))
         # i2c modules
 
@@ -333,11 +318,13 @@ try:
                 if item.lower() == "shtc3":
                     for index, item in enumerate(aprsData):
                         if item.startswith("PARM"):
-                            aprsData[index] = aprsData[index] + ",Temperature,Humidity"
+                            aprsData[index] = aprsData[index] + ",Temperature,Humidity,"
                         if item.startswith("UNIT"):
-                            aprsData[index] = aprsData[index] + ",deg.C,%"
+                            aprsData[index] = aprsData[index] + ",deg.C,%,"
                         if item.startswith("EQNS"):
-                            aprsData[index] = aprsData[index] + ",0,0.02,-50,0,1,0"
+                            aprsData[index] = (
+                                aprsData[index] + ",0,0.02,-50,0,1,0,0,0,0"
+                            )
                     import adafruit_shtc3
 
                     i2c_shtc3 = adafruit_shtc3.SHTC3(i2c)
@@ -366,12 +353,12 @@ try:
 
     print(yellow("Send Telemetry MetaDATA"))
     # send telemetry metadata once
+    if config.hasPa is True:
+        amp.value = True
+        time.sleep(0.3)
     for data in aprsData:
-        message = "{}>APRFGT::{}:{}".format(config.callsign, config.callsign, data)
+        message = "{}>APRFGT::{:9}:{}".format(config.callsign, config.callsign, data)
         loraLED.value = True
-        if config.hasPa is True:
-            amp.value = True
-            time.sleep(0.3)
         print(yellow("LoRa send message: " + message))
         rfm9x.send(
             w,
@@ -380,11 +367,11 @@ try:
             + binascii.unhexlify("01")
             + bytes("{}".format(message), "UTF-8"),
         )
-        if config.hasPa is True:
-            time.sleep(0.1)
-            amp.value = False
         loraLED.value = False
-        time.sleep(0.5)
+        time.sleep(0.2)
+    if config.hasPa is True:
+        time.sleep(0.1)
+        amp.value = False
 
     print(yellow("Start Tracking"))
 
