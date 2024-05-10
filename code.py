@@ -379,6 +379,8 @@ try:
     last_print = time.monotonic()
     last_lat = None
     last_lon = None
+    keepalive = False
+    metadataonce = False
     gps_blink = False
     gps_lock = False
     elapsed = time.time()
@@ -457,8 +459,39 @@ try:
                 keepalive = time.time()
                 last_lat = None
                 last_lon = None
+                keepalive = True
+            else:
+                metadataonce = False
+                keepalive = False
 
             if (time.time() - elapsed) >= config.rate or last_lon is None:
+                # send telemetry data once when in keepalive mode
+                if keepalive is True and metadataonce is False:
+                    metadataonce = True
+                    # send telemetry metadata once in keepalive modus
+                    print(yellow("Send Telemetry MetaDATA"))
+                    if config.hasPa is True:
+                        amp.value = True
+                        time.sleep(0.3)
+                    for data in aprsData:
+                        message = "{}>APRFGT::{:9}:{}".format(
+                            config.callsign, config.callsign, data
+                        )
+                        loraLED.value = True
+                        print(yellow("LoRa send message: " + message))
+                        rfm9x.send(
+                            w,
+                            bytes("{}".format("<"), "UTF-8")
+                            + binascii.unhexlify("FF")
+                            + binascii.unhexlify("01")
+                            + bytes("{}".format(message), "UTF-8"),
+                        )
+                        loraLED.value = False
+                        time.sleep(0.2)
+                    if config.hasPa is True:
+                        time.sleep(0.1)
+                        amp.value = False
+
                 my_distance = distance(last_lat, last_lon, gps.latitude, gps.longitude)
                 if my_distance > int(config.distance):
                     elapsed = time.time()
