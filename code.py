@@ -357,12 +357,11 @@ try:
     last_print = time.monotonic()
     last_lat = None
     last_lon = None
-    keepaliveTrigger = False
     isMoving = False
-    metadataOnce = False
     lowVoltageDelay = False
     gps_blink = False
     gps_lock = False
+    lastMetaData = time.time() - 86800
     elapsed = time.time()
     keepalive = time.time()
     skip1stbme680 = True
@@ -448,24 +447,21 @@ try:
 
             if (time.time() - keepalive) >= keepaliveTime:
                 keepalive = time.time()
-                if isMoving is False:
-                    print(yellow("We are standing still"))
-                if isMoving is False and keepaliveTrigger is False:
-                    keepaliveTrigger = True
-                    metadataOnce = True
                 last_lat = None
                 last_lon = None
+
             if isMoving is True:
                 if config.fullDebug is True:
                     print(yellow("We are moving"))
-                metadataOnce = False
-                keepaliveTrigger = False
+            else:
+                if config.fullDebug is True:
+                    print(yellow("We are standing still"))
 
             if (time.time() - elapsed) >= config.rate or last_lon is None:
                 # send telemetry data once when in keepalive mode
-                if metadataOnce is True and isMoving is False:
-                    metadataOnce = False
-                    # send telemetry metadata once in keepalive modus
+                if (time.time() - 86400) > lastMetaData and isMoving is False:
+                    # send telemetry metadata daily in keepalive modus
+                    lastMetaData = time.time()
                     print(yellow("Send Telemetry MetaDATA"))
                     if config.hasPa is True:
                         amp.value = True
@@ -490,7 +486,6 @@ try:
                         amp.value = False
             if (
                 config.voltage is True
-                and keepaliveTrigger is True
                 and config.triggerVoltage is True
                 and last_lon is None
             ):
@@ -534,119 +529,118 @@ try:
                     )
                     lowVoltageDelay is False
 
-                my_distance = distance(last_lat, last_lon, gps.latitude, gps.longitude)
-                if my_distance > int(config.distance):
-                    if last_lat is not None:
-                        isMoving = True
-                    elapsed = time.time()
-                    last_lat = gps.latitude
-                    last_lon = gps.longitude
+            my_distance = distance(last_lat, last_lon, gps.latitude, gps.longitude)
+            if config.fullDebug is True:
+                print(yellow("Moved distance (" + str(my_distance) + ")"))
+            if my_distance > int(config.distance):
+                if config.fullDebug is True:
+                    print(yellow("On the move!"))
+                isMoving = True
+                elapsed = time.time()
+                last_lat = gps.latitude
+                last_lon = gps.longitude
 
+                print(
+                    purple(
+                        "Location: LAT: "
+                        + str(gps.latitude)
+                        + " LON: "
+                        + str(gps.longitude)
+                    )
+                )
+
+                ts = aprs.makeTimestamp(
+                    "z",
+                    gps.timestamp_utc.tm_mday,
+                    gps.timestamp_utc.tm_hour,
+                    gps.timestamp_utc.tm_min,
+                    gps.timestamp_utc.tm_sec,
+                )
+
+                # user comment
+                comment = config.comment
+
+                # telemetry
+                sequence = sequence + 1
+                if sequence > 8191:
+                    sequence = 0
+                comment = (
+                    comment
+                    + "|"
+                    + base91_encode(sequence)
+                    + base91_encode(int(gps.satellites))
+                )
+                bat_voltage = int(round(get_voltage(analog_in), 2) * 100)
+                comment = comment + base91_encode(bat_voltage)
+                if shtc3 is True:
+                    temperature, relative_humidity = i2c_shtc3.measurements
+                    temp = int((round(temperature / 2, 2) + 25) * 100)
+                    hum = int(round(relative_humidity, 0))
+                    # if shtc failes ... just reload
+                    if hum is None:
+                        microcontroller.reset()
+                    comment = comment + base91_encode(temp) + base91_encode(hum)
                     print(
                         purple(
-                            "Location: LAT: "
-                            + str(gps.latitude)
-                            + " LON: "
-                            + str(gps.longitude)
+                            "SHTC3: Temperature: "
+                            + str(temperature)
+                            + " Humidity: "
+                            + str(relative_humidity)
                         )
                     )
-
-                    ts = aprs.makeTimestamp(
-                        "z",
-                        gps.timestamp_utc.tm_mday,
-                        gps.timestamp_utc.tm_hour,
-                        gps.timestamp_utc.tm_min,
-                        gps.timestamp_utc.tm_sec,
-                    )
-
-                    # user comment
-                    comment = config.comment
-
-                    # telemetry
-                    sequence = sequence + 1
-                    if sequence > 8191:
-                        sequence = 0
-                    comment = (
-                        comment
-                        + "|"
-                        + base91_encode(sequence)
-                        + base91_encode(int(gps.satellites))
-                    )
-                    bat_voltage = int(round(get_voltage(analog_in), 2) * 100)
-                    comment = comment + base91_encode(bat_voltage)
-                    if shtc3 is True:
-                        temperature, relative_humidity = i2c_shtc3.measurements
+                if bme680 is True:
+                    if skip1stbme680 is True:
+                        print(
+                            purple(
+                                "BME680: Skip first read to give BME some time to calibrate!"
+                            )
+                        )
+                        temperature = i2c_bme680.temperature
+                        relative_humidity = i2c_bme680.relative_humidity
+                        skip1stbme680 = False
+                    else:
+                        temperature = i2c_bme680.temperature + config.bme680_tempOffset
+                        relative_humidity = i2c_bme680.relative_humidity
                         temp = int((round(temperature / 2, 2) + 25) * 100)
                         hum = int(round(relative_humidity, 0))
-                        # if shtc failes ... just reload
-                        if hum is None:
-                            microcontroller.reset()
                         comment = comment + base91_encode(temp) + base91_encode(hum)
                         print(
                             purple(
-                                "SHTC3: Temperature: "
+                                "BME680: Temperature: "
                                 + str(temperature)
                                 + " Humidity: "
                                 + str(relative_humidity)
                             )
                         )
-                    if bme680 is True:
-                        if skip1stbme680 is True:
-                            print(
-                                purple(
-                                    "BME680: Skip first read to give BME some time to calibrate!"
-                                )
-                            )
-                            temperature = i2c_bme680.temperature
-                            relative_humidity = i2c_bme680.relative_humidity
-                            skip1stbme680 = False
-                        else:
-                            temperature = (
-                                i2c_bme680.temperature + config.bme680_tempOffset
-                            )
-                            relative_humidity = i2c_bme680.relative_humidity
-                            temp = int((round(temperature / 2, 2) + 25) * 100)
-                            hum = int(round(relative_humidity, 0))
-                            comment = comment + base91_encode(temp) + base91_encode(hum)
-                            print(
-                                purple(
-                                    "BME680: Temperature: "
-                                    + str(temperature)
-                                    + " Humidity: "
-                                    + str(relative_humidity)
-                                )
-                            )
-                    comment = comment + "|"
+                comment = comment + "|"
 
-                    # altitude
-                    if gps.altitude_m is not None:
-                        altitude = "/A={:06d}".format(int(gps.altitude_m * 3.2808399))
-                        comment = comment + altitude
-                        print(purple("GPS Altitude: " + str(gps.altitude_m) + " m"))
+                # altitude
+                if gps.altitude_m is not None:
+                    altitude = "/A={:06d}".format(int(gps.altitude_m * 3.2808399))
+                    comment = comment + altitude
+                    print(purple("GPS Altitude: " + str(gps.altitude_m) + " m"))
 
-                    # send LoRa packet
-                    message = "{}>APRFGT:@{}{}{}".format(
-                        config.callsign, ts, pos, comment
-                    )
-                    loraLED.value = True
-                    if config.hasPa is True:
-                        amp.value = True
-                        time.sleep(0.3)
-                    print(purple("LoRa send message: " + message))
-                    rfm9x.send(
-                        w,
-                        bytes("{}".format("<"), "UTF-8")
-                        + binascii.unhexlify("FF")
-                        + binascii.unhexlify("01")
-                        + bytes("{}".format(message), "UTF-8"),
-                    )
-                    if config.hasPa is True:
-                        time.sleep(0.1)
-                        amp.value = False
-                    loraLED.value = False
-                    nvm.save_data(sequence)
-                else:
-                    isMoving = False
+                # send LoRa packet
+                message = "{}>APRFGT:@{}{}{}".format(config.callsign, ts, pos, comment)
+                loraLED.value = True
+                if config.hasPa is True:
+                    amp.value = True
+                    time.sleep(0.3)
+                print(purple("LoRa send message: " + message))
+                rfm9x.send(
+                    w,
+                    bytes("{}".format("<"), "UTF-8")
+                    + binascii.unhexlify("FF")
+                    + binascii.unhexlify("01")
+                    + bytes("{}".format(message), "UTF-8"),
+                )
+                if config.hasPa is True:
+                    time.sleep(0.1)
+                    amp.value = False
+                loraLED.value = False
+                nvm.save_data(sequence)
+            else:
+                isMoving = False
             time.sleep(0.1)
 except Exception as error:
     print("Tracking err reloading: ", error)
