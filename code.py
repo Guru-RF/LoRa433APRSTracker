@@ -80,7 +80,7 @@ def distance(lat1, lon1, lat2, lon2):
 # voltage meter (12v/4v)
 def get_voltage(pin):
     if config.hasPa is True:
-        return ((pin.value * 3.3) / 65536) + 10.6 + 0.7
+        return ((pin.value * 3.3) / 65536) + 10.6 + 1.4
     else:
         return ((pin.value * 3.3) / 65536) * 2
 
@@ -351,36 +351,16 @@ try:
                 w.feed()
                 time.sleep(1)
 
-    print(yellow("Send Telemetry MetaDATA"))
-    # send telemetry metadata once
-    if config.hasPa is True:
-        amp.value = True
-        time.sleep(0.3)
-    for data in aprsData:
-        message = "{}>APRFGT::{:9}:{}".format(config.callsign, config.callsign, data)
-        loraLED.value = True
-        print(yellow("LoRa send message: " + message))
-        rfm9x.send(
-            w,
-            bytes("{}".format("<"), "UTF-8")
-            + binascii.unhexlify("FF")
-            + binascii.unhexlify("01")
-            + bytes("{}".format(message), "UTF-8"),
-        )
-        loraLED.value = False
-        time.sleep(0.2)
-    if config.hasPa is True:
-        time.sleep(0.1)
-        amp.value = False
-
     print(yellow("Start Tracking"))
 
     # start tracking
     last_print = time.monotonic()
     last_lat = None
     last_lon = None
-    keepalive = False
-    metadataonce = False
+    keepaliveTrigger = False
+    isMoving = False
+    metadataOnce = False
+    lowVoltageDelay = False
     gps_blink = False
     gps_lock = False
     elapsed = time.time()
@@ -392,7 +372,7 @@ try:
             gps.update()
         except MemoryError:
             print(yellow("Memory Leak !!! Reboot ..."))
-            # the gps module has a nasty memory leak just ignore and reload (Gps trackings stays in tact)
+            # the gps module has a nasty memory leak just ignore and restart (Gps trackings stays in tact)
             microcontroller.reset()
 
         if gps_lock is False:
@@ -455,19 +435,36 @@ try:
                 gps.latitude, gps.longitude, speed, angle, config.symbol
             )
 
-            if (time.time() - keepalive) >= config.keepalive:
+            keepaliveTime = config.keepalive
+            if lowVoltageDelay is True:
+                if config.fullDebug is True:
+                    print(
+                        yellow(
+                            "We are in low voltage mode keepalivetime set to "
+                            + str(config.triggerVoltageKeepalive)
+                        )
+                    )
+                keepaliveTime = config.triggerVoltageKeepalive
+
+            if (time.time() - keepalive) >= keepaliveTime:
                 keepalive = time.time()
+                if isMoving is False:
+                    print(yellow("We are standing still"))
+                if isMoving is False and keepaliveTrigger is False:
+                    keepaliveTrigger = True
+                    metadataOnce = True
                 last_lat = None
                 last_lon = None
-                keepalive = True
-            else:
-                metadataonce = False
-                keepalive = False
+            if isMoving is True:
+                if config.fullDebug is True:
+                    print(yellow("We are moving"))
+                metadataOnce = False
+                keepaliveTrigger = False
 
             if (time.time() - elapsed) >= config.rate or last_lon is None:
                 # send telemetry data once when in keepalive mode
-                if keepalive is True and metadataonce is False:
-                    metadataonce = True
+                if metadataOnce is True and isMoving is False:
+                    metadataOnce = False
                     # send telemetry metadata once in keepalive modus
                     print(yellow("Send Telemetry MetaDATA"))
                     if config.hasPa is True:
@@ -491,9 +488,56 @@ try:
                     if config.hasPa is True:
                         time.sleep(0.1)
                         amp.value = False
+            if (
+                config.voltage is True
+                and keepaliveTrigger is True
+                and config.triggerVoltage is True
+                and last_lon is None
+            ):
+                bat_voltage = int(round(get_voltage(analog_in), 2) * 100)
+                if 1000 <= bat_voltage <= config.triggerVoltageLevel:
+                    lowVoltageDelay = True
+                    print(
+                        yellow(
+                            "Low voltage detected (" + str(bat_voltage / 100) + ") !!!"
+                        )
+                    )
+                    # send RF message to pager here
+                    print(yellow("Send APRS low voltage message"))
+                    if config.hasPa is True:
+                        amp.value = True
+                        time.sleep(0.3)
+                        message = "{}>APRFGT::{:9}:{}".format(
+                            config.callsign,
+                            config.triggerVoltageCall,
+                            "Low Voltage ("
+                            + str(bat_voltage / 100)
+                            + "V) detected on vehicle !",
+                        )
+                        loraLED.value = True
+                        print(yellow("LoRa send message: " + message))
+                        rfm9x.send(
+                            w,
+                            bytes("{}".format("<"), "UTF-8")
+                            + binascii.unhexlify("FF")
+                            + binascii.unhexlify("01")
+                            + bytes("{}".format(message), "UTF-8"),
+                        )
+                        loraLED.value = False
+                        time.sleep(0.2)
+                    if config.hasPa is True:
+                        time.sleep(0.1)
+                        amp.value = False
+                else:
+                    print(
+                        yellow("Voltage level OK (" + str(bat_voltage / 100) + ") !!!")
+                    )
+                    lowVoltageDelay is False
 
                 my_distance = distance(last_lat, last_lon, gps.latitude, gps.longitude)
                 if my_distance > int(config.distance):
+                    if last_lat is not None:
+                        isMoving = True
                     elapsed = time.time()
                     last_lat = gps.latitude
                     last_lon = gps.longitude
@@ -601,6 +645,8 @@ try:
                         amp.value = False
                     loraLED.value = False
                     nvm.save_data(sequence)
+                else:
+                    isMoving = False
             time.sleep(0.1)
 except Exception as error:
     print("Tracking err reloading: ", error)

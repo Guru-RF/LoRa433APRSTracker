@@ -1,3 +1,4 @@
+fullDebug = False
 power = 23  # min 5dBm max 23dBm
 hasPa = True  # has a power amplifier (adds 6dBm)
 callsign = "--CALL--"
@@ -15,6 +16,11 @@ rate = 30  # seconds (packet frequency when moving)
 keepalive = 300  # in seconds (When no movement report every ...) when on solar/battary set this 900 (15 mins) else 300 (5 mins)
 distance = 100  # minimum distance change to report
 voltage = True
+triggerVoltage = True
+triggerVoltageLevel = 1200 # bellow will trigger an alert (APRS message to triggerVoltageCall)
+triggerVoltageCall = "TOCALL"
+#triggerVoltageKeepalive = 1800 # half an hour will send warning messages half an hour !
+triggerVoltageKeepalive = 1800 # half an hour will send warning messages half an hour !
 i2cEnabled = --BOOL--
 i2cDevices = ["BME680"]
 bme680_tempOffset = 0
