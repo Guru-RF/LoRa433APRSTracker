@@ -59,7 +59,11 @@ def yellow(data):
 
 
 def red(data):
-    return "\x1b[1;5;31m -- " + data + "\x1b[0m"
+    return "\x1b[1;5;31m" + data + "\x1b[0m"
+
+
+def green(data):
+    return "\x1b[1;5;32m" + data + "\x1b[0m"
 
 
 # geometry distance calculator in meters
@@ -151,7 +155,7 @@ def _format_datetime(datetime):
     )
 
 
-print(red(config.callsign + " -=- " + VERSION))
+print(red(" -- " + config.callsign + " -=- " + VERSION))
 
 print(yellow("Sequence: " + str(sequence)))
 print(yellow("Init PINs"))
@@ -329,7 +333,7 @@ try:
 
                     i2c_shtc3 = adafruit_shtc3.SHTC3(i2c)
                     shtc3 = True
-                    print(yellow(">shtc loaded"))
+                    print(green(">shtc loaded"))
                 if item.lower() == "bme680":
                     for index, item in enumerate(aprsData):
                         if item.startswith("PARM"):
@@ -343,13 +347,12 @@ try:
                     i2c_bme680 = adafruit_bme680.Adafruit_BME680_I2C(i2c)
                     i2c_bme680.sea_level_pressure = 1015
                     bme680 = True
-                    print(yellow(">bme680 loaded"))
+                    print(green(">bme680 loaded"))
         except Exception as error:
             i2cPower.value = False
-            print("I2C Error: ", error)
-            while True:
-                w.feed()
-                time.sleep(1)
+            print(red("I2C Error: " + str(error)))
+            shtc3 = False
+            bme680 = False
 
     print(yellow("Start Tracking"))
 
@@ -438,7 +441,7 @@ try:
             if lowVoltageDelay is True:
                 if config.fullDebug is True:
                     print(
-                        yellow(
+                        green(
                             "We are in low voltage mode keepalivetime set to "
                             + str(config.triggerVoltageKeepalive)
                         )
@@ -452,10 +455,10 @@ try:
 
             if isMoving is True:
                 if config.fullDebug is True:
-                    print(yellow("We are moving"))
+                    print(green("We are moving"))
             else:
                 if config.fullDebug is True:
-                    print(yellow("We are standing still"))
+                    print(green("We are standing still"))
 
             if (time.time() - elapsed) >= config.rate or last_lon is None:
                 # send telemetry data once when in keepalive mode
@@ -531,10 +534,10 @@ try:
 
             my_distance = distance(last_lat, last_lon, gps.latitude, gps.longitude)
             if config.fullDebug is True:
-                print(yellow("Moved distance (" + str(my_distance) + ")"))
+                print(green("Moved distance (" + str(my_distance) + ")"))
             if my_distance > int(config.distance):
                 if config.fullDebug is True:
-                    print(yellow("On the move!"))
+                    print(green("On the move!"))
                 isMoving = True
                 elapsed = time.time()
                 last_lat = gps.latitude
