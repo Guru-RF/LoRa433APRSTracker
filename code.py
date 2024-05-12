@@ -29,15 +29,6 @@ w.mode = WatchDogMode.RESET
 w.feed()
 
 
-def cleanup():
-    try:
-        os.unlink("/check")
-        os.unlink("/ro")
-        return True
-    except OSError:
-        return True
-
-
 def file_or_dir_exists(filename):
     try:
         return os.stat(filename)
@@ -133,12 +124,177 @@ try:
 except EOFError:
     nvm.save_data(0)
 
+try:
+    if not (config.fullDebug is False or config.fullDebug is True):
+        print(
+            yellow(
+                "fullDebug (True/False) is not defined in config file, modify and reboot !"
+            )
+        )
+        while True:
+            w.feed()
+            time.sleep(1)
 
-if config.callsign == "":
-    print(yellow("No callsign defined in config file modify and reboot !"))
+    if isinstance(config.power, int):
+        if 5 < config.power > 23:
+            print(
+                yellow(
+                    "power (5< >23) out of range in config file, modify and reboot !"
+                )
+            )
+            while True:
+                w.feed()
+                time.sleep(1)
+
+    if not (config.hasPa is False or config.hasPa is True):
+        print(
+            yellow(
+                "hasPa (True/False) is not defined in config file, modify and reboot !"
+            )
+        )
+        while True:
+            w.feed()
+            time.sleep(1)
+
+    if isinstance(config.callsign, bytes):
+        print(yellow("callsign is not defined in config file, modify and reboot !"))
+        while True:
+            w.feed()
+            time.sleep(1)
+
+    if isinstance(config.symbol, bytes):
+        print(yellow("symbol is not defined in config file, modify and reboot !"))
+        while True:
+            w.feed()
+            time.sleep(1)
+
+    if isinstance(config.comment, bytes):
+        print(yellow("comment is not defined in config file, modify and reboot !"))
+        while True:
+            w.feed()
+            time.sleep(1)
+
+    if isinstance(config.rate, int):
+        if 15 < config.power > 60:
+            print(
+                yellow(
+                    "rate (15< >60) out of range in config file, modify and reboot !"
+                )
+            )
+            while True:
+                w.feed()
+                time.sleep(1)
+
+    if isinstance(config.keepalive, int):
+        if 300 < config.keepalive > 3600:
+            print(
+                yellow(
+                    "keepalive (300< >3600) out of range in config file, modify and reboot !"
+                )
+            )
+            while True:
+                w.feed()
+                time.sleep(1)
+
+    if isinstance(config.distance, int):
+        if 25 < config.distance > 1000:
+            print(
+                yellow(
+                    "distance (300< >3600) out of range in config file, modify and reboot !"
+                )
+            )
+            while True:
+                w.feed()
+                time.sleep(1)
+
+    if not (config.voltage is False or config.voltage is True):
+        print(
+            yellow(
+                "voltage (True/False) is not defined in config file, modify and reboot !"
+            )
+        )
+        while True:
+            w.feed()
+            time.sleep(1)
+
+    if not (config.triggerVoltage is False or config.triggerVoltage is True):
+        print(
+            yellow(
+                "triggerVoltage (True/False) is not defined in config file, modify and reboot !"
+            )
+        )
+        while True:
+            w.feed()
+            time.sleep(1)
+
+    if isinstance(config.triggerVoltageLevel, int):
+        if 250 < config.triggerVoltageLevel > 1280:
+            print(
+                yellow(
+                    "triggerVoltageLevel (250< >1280) is not defined in config file, modify and reboot !"
+                )
+            )
+            while True:
+                w.feed()
+                time.sleep(1)
+
+    if isinstance(config.triggerVoltageCall, bytes):
+        print(
+            yellow(
+                "triggerVoltageCall is not defined in config file, modify and reboot !"
+            )
+        )
+        while True:
+            w.feed()
+            time.sleep(1)
+
+    if isinstance(config.triggerVoltageKeepalive, int):
+        if 3600 < config.triggerVoltageKeepalive > 14400:
+            print(
+                yellow(
+                    "triggerVoltageLevel (250< >1280) is not defined in config file, modify and reboot !"
+                )
+            )
+            while True:
+                w.feed()
+                time.sleep(1)
+
+    if not (config.i2cEnabled is False or config.i2cEnabled is True):
+        print(
+            yellow(
+                "i2cEnabled (True/False) is not defined in config file, modify and reboot !"
+            )
+        )
+        while True:
+            w.feed()
+            time.sleep(1)
+
+    if type(config.i2cDevices) not in (tuple, list):
+        print(
+            yellow(
+                'i2cDevice = ["BME680"] is not defined in config file, modify and reboot !'
+            )
+        )
+        while True:
+            w.feed()
+            time.sleep(1)
+
+    if isinstance(config.bme680_tempOffset, int):
+        if 0 < config.bme680_tempOffset > 99:
+            print(
+                yellow(
+                    "bme680_tempOffset (0< >99) is not defined in config file, modify and reboot !"
+                )
+            )
+            while True:
+                w.feed()
+                time.sleep(1)
+except AttributeError as error:
+    print(yellow("config.py :" + str(error)))
     while True:
         w.feed()
         time.sleep(1)
+
 
 # convert to upper
 config.callsign = config.callsign.upper()

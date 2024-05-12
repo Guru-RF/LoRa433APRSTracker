@@ -15,7 +15,7 @@ comment = "https://RF.Guru"
 rate = 15  # seconds (packet frequency when moving)
 keepalive = 300  # in seconds (When no movement report every ...) when on solar/battary set this 900 (15 mins) else 300 (5 mins)
 distance = 100  # minimum distance change to report
-voltage = True
+voltage = True  # monitor voltage
 triggerVoltage = True
 triggerVoltageLevel = (
     1200  # bellow will trigger an alert (APRS message to triggerVoltageCall)
