@@ -17,9 +17,13 @@ keepalive = 300  # in seconds (When no movement report every ...) when on solar/
 distance = 100  # minimum distance change to report
 voltage = True
 triggerVoltage = True
-triggerVoltageLevel = 1200 # bellow will trigger an alert (APRS message to triggerVoltageCall)
-triggerVoltageCall = "TOCALL"
-triggerVoltageKeepalive = 3600 # an hour, this will send warning messages until voltage levels stabalize!
-i2cEnabled = --BOOL--
+triggerVoltageLevel = (
+    1200  # bellow will trigger an alert (APRS message to triggerVoltageCall)
+)
+triggerVoltageCall = "--MSGS--"
+triggerVoltageKeepalive = (
+    3600  # an hour, this will send warning messages until voltage levels stabalize!
+)
+i2cEnabled = True
 i2cDevices = ["BME680"]
 bme680_tempOffset = 0

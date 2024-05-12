@@ -3,12 +3,12 @@
 args=("$@")
 
 if [ -z "${args[0]}" ]; then
-  echo "Please provide a callsign"
+  echo "Please provide a tracker callsign"
   exit 1
 fi
 
-if ! ([ "${args[1]}" = "False" ] || [ "${args[1]}" = "True"  ]); then
-  echo "Please provide a True/False for i2c"
+if [ -z "${args[1]}" ]; then
+  echo "Please provide an error messages callsign"
   exit 1
 fi
 
@@ -16,9 +16,9 @@ DIR="/Volumes/RPI-RP2"
 if [ -d "$DIR" ]; then
   echo "Installing firmwire to pico in ${DIR}..."
   cd /tmp
-  wget https://downloads.circuitpython.org/bin/raspberry_pi_pico/en_US/adafruit-circuitpython-raspberry_pi_pico-en_US-9.0.0.uf2
-  cp adafruit-circuitpython-raspberry_pi_pico-en_US-9.0.0.uf2 /Volumes/RPI-RP2
-  rm adafruit-circuitpython-raspberry_pi_pico-en_US-9.0.0.uf2
+  wget https://downloads.circuitpython.org/bin/raspberry_pi_pico/en_US/adafruit-circuitpython-raspberry_pi_pico-en_US-9.0.4.uf2
+  cp adafruit-circuitpython-raspberry_pi_pico-en_US-9.0.4.uf2 /Volumes/RPI-RP2
+  rm adafruit-circuitpython-raspberry_pi_pico-en_US-9.0.4.uf2
   echo "Sleeping 20 seconds for firmware to install"
   cd -
   sleep 20
@@ -32,7 +32,7 @@ if [ -d "$DIR" ]; then
   echo "1" > /Volumes/CIRCUITPY/sequence
   cp config.py /tmp
   perl -i -pe "s/--CALL--/${args[0]}/g" /tmp/config.py
-  perl -i -pe "s/--BOOL--/${args[1]}/g" /tmp/config.py
+  perl -i -pe "s/--MSGS--/${args[1]}/g" /tmp/config.py
   cp -f /tmp/config.py /Volumes/CIRCUITPY
   cp code.py /Volumes/CIRCUITPY
   rm -f /tmp/config.py
