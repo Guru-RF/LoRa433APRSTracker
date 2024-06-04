@@ -5,8 +5,15 @@ import digitalio
 import storage
 import supervisor
 import usb_cdc
+from microcontroller import watchdog as w
+from watchdog import WatchDogMode
 
 supervisor.runtime.autoreload = False
+
+# configure watchdog
+w.timeout = 5
+w.mode = WatchDogMode.RESET
+w.feed()
 
 supervisor.set_usb_identification("RF.Guru", "APRSTRKR")
 
