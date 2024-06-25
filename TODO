@@ -1,2 +1,4 @@
+send aprs message to ON6URE-? with version ... to mail/message people for new firmware
+additional features (running in datacenter)
 send email/24h (5 times ?) when battery is < via config
 send page/24h (5 times ?) when battery is < via config
