@@ -7,7 +7,7 @@
 [PCB - RF.Guru LoRA APRS Tracker Automotive 433Mhz](https://shop.rf.guru/products/2023-p-521) 512mW Power
 
 # Installation procedure #
-Connect the device to our computer using a UBC-C cable; a drive labeled 'RPI-RP2' will appear. 
+Connect the device to our computer using a UBC-C cable; do not connect the 13.8v Powerpole connector !!!; a drive labeled 'RPI-RP2' will appear. 
 
 [Download the code](https://github.com/Guru-RF/LoRa433APRSTracker/archive/refs/heads/main.zip)
 
