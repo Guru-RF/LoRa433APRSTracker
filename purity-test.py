@@ -34,9 +34,10 @@ spi = busio.SPI(board.GP18, MOSI=board.GP19, MISO=board.GP16)
 rfm9x = adafruit_rfm9x.RFM9x(spi, CS, RESET, RADIO_FREQ_MHZ, baudrate=1000000)
 rfm9x.tx_power = 23
 
-amp.value = True
 message = "testsdhkjfklsdhjfklsdjfklsjfklsjfklsfklsdjfklsdjflkjskljskldjflks"
 while True:
+    amp.value = True
+    time.sleep(0.1)
     print("LoRa send message: " + message)
     rfm9x.send(
         w,
@@ -45,5 +46,6 @@ while True:
         + binascii.unhexlify("01")
         + bytes("{}".format(message), "UTF-8"),
     )
+    amp.value = False
     time.sleep(0.2)
 
