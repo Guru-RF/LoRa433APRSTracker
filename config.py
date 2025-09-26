@@ -6,6 +6,7 @@ callsign = "--CALL--"
 # symbol = '/>' # car
 # symbol = '/<' # motorbike
 # symbol = '\>' # car
+# symbol = '/k' # pickup truck
 symbol = "L>"  # lora car
 # symbol = 'Uk' # truck
 # symbol = '/j' # jeep
