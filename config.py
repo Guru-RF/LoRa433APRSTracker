@@ -4,6 +4,7 @@ hasPa = True  # has a power amplifier (adds 6dBm)
 callsign = "--CALL--"
 # symbol = '/b' # bike
 # symbol = '/>' # car
+# symbol = '/<' # motorbike
 # symbol = '\>' # car
 symbol = "L>"  # lora car
 # symbol = 'Uk' # truck

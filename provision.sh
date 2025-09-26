@@ -15,7 +15,7 @@ fi
 DIR="/Volumes/RPI-RP2"
 if [ -d "$DIR" ]; then
   echo "Installing firmwire to pico in ${DIR}..."
-  cp adafruit-circuitpython-rfguru_rp2040-en_US-9.2.8.uf2 /Volumes/RPI-RP2
+  cp adafruit-circuitpython-rfguru_rp2040-en_US-9.2.9.uf2 /Volumes/RPI-RP2
   echo "Sleeping 20 seconds for firmware to install"
   sleep 20
 fi
