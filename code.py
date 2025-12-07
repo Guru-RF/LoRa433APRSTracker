@@ -175,10 +175,10 @@ try:
             time.sleep(1)
 
     if isinstance(config.rate, int):
-        if 15 < config.power > 60:
+        if 10 < config.power > 60:
             print(
                 yellow(
-                    "rate (15< >60) out of range in config file, modify and reboot !"
+                    "rate (10< >60) out of range in config file, modify and reboot !"
                 )
             )
             while True:
@@ -200,7 +200,7 @@ try:
         if 25 < config.distance > 1000:
             print(
                 yellow(
-                    "distance (300< >3600) out of range in config file, modify and reboot !"
+                    "distance (25< >1000) out of range in config file, modify and reboot !"
                 )
             )
             while True:
