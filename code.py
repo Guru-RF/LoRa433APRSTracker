@@ -657,7 +657,7 @@ while True:
     break  # exit loop into Part 4 sending section
 
 # ============================================================
-#       PART 4: APRS PACKET CONSTRUCTION AND SENDING
+#             APRS PACKET CONSTRUCTION AND SENDING
 # ============================================================
 
 while True:  # Beacon sending loop
@@ -775,7 +775,7 @@ while True:  # Beacon sending loop
     break
 
 # ============================================================
-#      PART 5 — METADATA / VOLTAGE ALERTS / LOOP RETURN
+#           METADATA / VOLTAGE ALERTS / LOOP RETURN
 # ============================================================
 
 # We return here from the normal position-beacon send block
@@ -873,5 +873,4 @@ while True:
     # ------------------------------------------------------------
     break  # exit back to the GPS → SmartBeacon decision loop
 
-# End PART 5
-# Main loop continues back at the GPS update SmartBeacon block in PART 3
+# Main loop continues back at the GPS update SmartBeacon block
