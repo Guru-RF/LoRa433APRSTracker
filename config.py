@@ -1,10 +1,11 @@
+
 # ------------------------------------------------------------
-# RF.Guru LoRa APRS Tracker Configuration (SmartBeaconing Only)
+# RF.Guru LoRa APRS Tracker Configuration
+# (SmartBeaconing + Telemetry + Voltage + optional I2C)
 # ------------------------------------------------------------
 
 # Select profile: "car", "bike", "hiker"
 profile = "car"     # <-- DEFAULT
-
 
 # ------------------------------------------------------------
 # Common Settings
@@ -15,66 +16,73 @@ fullDebug = False
 power = 23          # 5–23 dBm
 hasPa = True        # PA adds ~6 dBm
 
+# Optional override
+# loraFrequency = 433.775
+
 # APRS identification
-callsign = "--CALL--"
-symbol   = "L>"             # LoRa car symbol (change per profile if desired)
+callsign = "N0CALL-7"     # <-- CHANGE THIS
+symbol   = "L>"           # 2 chars: symbol table + symbol
 comment  = "https://RF.Guru"
 
+# ------------------------------------------------------------
+# Legacy compatibility (only used when smartBeaconing=False)
+# ------------------------------------------------------------
+rate = 30          # seconds
+keepalive = 900    # seconds
+distance = 50      # meters
+
+# ------------------------------------------------------------
 # Voltage monitoring
+# ------------------------------------------------------------
 voltage = True
 triggerVoltage = True
-triggerVoltageLevel = 1200         # mV x100 → 12.00V threshold
-triggerVoltageCall = "--MSGS--"
-triggerVoltageKeepalive = 3600     # seconds
+triggerVoltageLevel = 1200         # V*100 → 12.00V threshold
+triggerVoltageCall = "N0CALL"      # <-- destination addressee for alert (max 9 chars)
+triggerVoltageKeepalive = 3600     # seconds (min time between voltage alert messages)
 
-
+# ------------------------------------------------------------
 # I2C sensors
+# ------------------------------------------------------------
 i2cEnabled = True
-i2cDevices = ["BME680"]
-bme680_tempOffset = 0
-
-
+i2cDevices = ["BME680"]            # supported: "BME680" or "SHTC3"
+bme680_tempOffset = 0              # add offset in °C if needed
 
 # ------------------------------------------------------------
 # SMARTBEACONING PRESETS
 # ------------------------------------------------------------
-# Each preset contains settings tuned for movement pattern.
-
 
 PRESET_CAR = {
-    "fastRate": 15,          # Fast road speed beaconing
-    "slowRate": 180,         # Low speed / city driving
-    "fastSpeed": 60,         # Over 60 km/h → fast beaconing
-    "slowSpeed": 10,         # Under 10 km/h → slow beaconing
-    "stationarySpeed": 1.0,  # Below → freeze GPS
-    "turnThreshold": 30,     # Corner peg at 30°
-    "turnSlope": 5,          # Dynamic turn trigger
+    "fastRate": 15,          # seconds at/above fastSpeed
+    "slowRate": 180,         # seconds at/below slowSpeed or stationary
+    "fastSpeed": 60,         # km/h
+    "slowSpeed": 10,         # km/h
+    "stationarySpeed": 1.0,  # km/h (below -> position freeze)
+    "turnThreshold": 30,     # degrees
+    "turnSlope": 5,          # deg/sec (turn rate trigger)
     "headingFilter": True
 }
 
 PRESET_BIKE = {
-    "fastRate": 25,          # Bikes move slower
-    "slowRate": 240,         # Allow longer intervals
-    "fastSpeed": 25,         # Above 25 km/h considered fast
-    "slowSpeed": 5,          # Under 5 km/h → slow
-    "stationarySpeed": 0.6,  # Slight GPS drift at low speed
-    "turnThreshold": 22,     # Bikes make sharper turns
-    "turnSlope": 4,          # More sensitive to rotation
+    "fastRate": 25,
+    "slowRate": 240,
+    "fastSpeed": 25,
+    "slowSpeed": 5,
+    "stationarySpeed": 0.6,
+    "turnThreshold": 22,
+    "turnSlope": 4,
     "headingFilter": True
 }
 
 PRESET_HIKER = {
-    "fastRate": 40,          # Very slow movement
-    "slowRate": 360,         # Up to 6 minutes when slow
-    "fastSpeed": 10,         # Over 10 km/h for hikers = fast
-    "slowSpeed": 1.5,        # Below this considered slow
-    "stationarySpeed": 0.4,  # Freeze at very low movement
-    "turnThreshold": 18,     # Sensitive to direction changes
-    "turnSlope": 3,          # Hikers turn often
+    "fastRate": 40,
+    "slowRate": 360,
+    "fastSpeed": 10,
+    "slowSpeed": 1.5,
+    "stationarySpeed": 0.4,
+    "turnThreshold": 18,
+    "turnSlope": 3,
     "headingFilter": True
 }
-
-
 
 # ------------------------------------------------------------
 # APPLY PROFILE
