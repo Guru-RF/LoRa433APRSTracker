@@ -1,6 +1,6 @@
 # ============================================================
 # RF.Guru LoRa APRS Tracker (SmartBeaconing Edition)
-# - Fixes: compile/runtime issues + stationary GPS jitter (deadband + hysteresis)
+# - Fixes: compile/runtime issues + stationary GPS jitter (deadband + hysteresis) + stable GPS LED blink
 # - Runs continuously
 # - Uses config presets: sb_fastRate/sb_slowRate/sb_fastSpeed/sb_slowSpeed/...
 # - Voltage alert + daily telemetry metadata supported
