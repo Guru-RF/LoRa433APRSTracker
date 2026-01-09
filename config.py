@@ -1,7 +1,6 @@
-
 # ------------------------------------------------------------
 # RF.Guru LoRa APRS Tracker Configuration
-# (SmartBeaconing + Telemetry + Voltage + optional I2C)
+# (SmartBeaconing + Telemetry + Voltage + optional I2C + Stationary jitter deadband)
 # ------------------------------------------------------------
 
 # Select profile: "car", "bike", "hiker"
@@ -38,27 +37,34 @@ voltage = True
 triggerVoltage = True
 triggerVoltageLevel = 1200         # V*100 → 12.00V threshold
 triggerVoltageCall = "N0CALL"      # <-- destination addressee for alert (max 9 chars)
-triggerVoltageKeepalive = 3600     # seconds (min time between voltage alert messages)
+triggerVoltageKeepalive = 3600     # seconds
 
 # ------------------------------------------------------------
 # I2C sensors
 # ------------------------------------------------------------
 i2cEnabled = True
 i2cDevices = ["BME680"]            # supported: "BME680" or "SHTC3"
-bme680_tempOffset = 0              # add offset in °C if needed
+bme680_tempOffset = 0              # °C
 
 # ------------------------------------------------------------
 # SMARTBEACONING PRESETS
 # ------------------------------------------------------------
 
 PRESET_CAR = {
-    "fastRate": 15,          # seconds at/above fastSpeed
-    "slowRate": 180,         # seconds at/below slowSpeed or stationary
-    "fastSpeed": 60,         # km/h
-    "slowSpeed": 10,         # km/h
-    "stationarySpeed": 1.0,  # km/h (below -> position freeze)
-    "turnThreshold": 30,     # degrees
-    "turnSlope": 5,          # deg/sec (turn rate trigger)
+    "fastRate": 15,            # seconds at/above fastSpeed
+    "slowRate": 180,           # seconds at/below slowSpeed or stationary
+    "fastSpeed": 60,           # km/h
+    "slowSpeed": 10,           # km/h
+    "stationarySpeed": 1.0,    # km/h
+
+    # NEW: stationary jitter control
+    # Leave the anchor only after we moved >= this many meters...
+    "stationaryDistance": 25,  # meters
+    # ...for this many consecutive fixes (filters single bad GPS jumps)
+    "stationaryExitCount": 3,  # fixes (with 1Hz GPS = ~3 sec)
+
+    "turnThreshold": 30,       # degrees
+    "turnSlope": 5,            # deg/sec
     "headingFilter": True
 }
 
@@ -68,6 +74,10 @@ PRESET_BIKE = {
     "fastSpeed": 25,
     "slowSpeed": 5,
     "stationarySpeed": 0.6,
+
+    "stationaryDistance": 15,
+    "stationaryExitCount": 3,
+
     "turnThreshold": 22,
     "turnSlope": 4,
     "headingFilter": True
@@ -79,6 +89,10 @@ PRESET_HIKER = {
     "fastSpeed": 10,
     "slowSpeed": 1.5,
     "stationarySpeed": 0.4,
+
+    "stationaryDistance": 8,
+    "stationaryExitCount": 3,
+
     "turnThreshold": 18,
     "turnSlope": 3,
     "headingFilter": True
@@ -104,6 +118,11 @@ sb_slowRate = p["slowRate"]
 sb_fastSpeed = p["fastSpeed"]
 sb_slowSpeed = p["slowSpeed"]
 sb_stationarySpeed = p["stationarySpeed"]
+
+# NEW exports
+sb_stationaryDistance = p["stationaryDistance"]
+sb_stationaryExitCount = p["stationaryExitCount"]
+
 sb_turnThreshold = p["turnThreshold"]
 sb_turnSlope = p["turnSlope"]
 sb_headingFilter = p["headingFilter"]

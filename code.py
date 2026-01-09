@@ -1,13 +1,12 @@
 # ============================================================
 # RF.Guru LoRa APRS Tracker (SmartBeaconing Edition)
-# - Fixes: "identifier redefined as global", unpack errors
-# - Runs continuously (does not stop after 1 TX)
+# - Fixes: compile/runtime issues + stationary GPS jitter (deadband + hysteresis)
+# - Runs continuously
 # - Uses config presets: sb_fastRate/sb_slowRate/sb_fastSpeed/sb_slowSpeed/...
 # - Voltage alert + daily telemetry metadata supported
 # ============================================================
 
 import binascii
-import os
 import time
 from math import atan2, cos, radians, sin, sqrt
 
@@ -38,13 +37,13 @@ w.timeout = 5
 w.mode = WatchDogMode.RESET
 w.feed()
 
-# Optional serial (not required, but kept for compatibility)
+# Optional serial (kept for compatibility)
 serial = usb_cdc.data
 
 time.sleep(3)
 w.feed()
 
-VERSION = "RF.Guru_LoRa433APRSTracker 1.0-SB"
+VERSION = "RF.Guru_LoRa433APRSTracker 1.1-SB"
 
 # ============================================================
 #       HELPERS
@@ -91,7 +90,6 @@ def get_voltage(pin):
 def base91_encode(n):
     """
     Encode a non-negative integer to APRS Base91 with at least 2 chars.
-    This matches the |..| telemetry style used by your original code.
     """
     n = int(n)
     if n < 0:
@@ -185,6 +183,17 @@ try:
     if not (0 <= float(config.sb_slowSpeed) < float(config.sb_fastSpeed) <= 200):
         raise AttributeError("sb_slowSpeed must be < sb_fastSpeed (0–200 km/h)")
 
+    # Stationary jitter filter (distance + hysteresis)
+    if not hasattr(config, "sb_stationaryDistance"):
+        raise AttributeError("sb_stationaryDistance missing (meters)")
+    if not (1 <= int(config.sb_stationaryDistance) <= 500):
+        raise AttributeError("sb_stationaryDistance must be 1–500 meters")
+
+    if not hasattr(config, "sb_stationaryExitCount"):
+        raise AttributeError("sb_stationaryExitCount missing (1..10)")
+    if not (1 <= int(config.sb_stationaryExitCount) <= 10):
+        raise AttributeError("sb_stationaryExitCount must be 1–10")
+
     if not (5 <= int(config.sb_turnThreshold) <= 90):
         raise AttributeError("sb_turnThreshold must be 5–90 degrees")
 
@@ -213,7 +222,7 @@ class SmartBeacon:
     SmartBeaconing features:
       - fast/slow rate selection based on speed (uses slowSpeed..fastSpeed)
       - optional corner pegging (turnThreshold/turnSlope)
-      - stationary interval (slowRate) + GPS position freeze handled outside
+      - stationary interval (slowRate)
       - heading filter that correctly handles 359° <-> 0° wrap
     """
 
@@ -243,18 +252,12 @@ class SmartBeacon:
             self.filtered_heading = heading
             return heading
 
-        # shortest signed delta in degrees (-180..+180)
         delta = ((heading - self.filtered_heading + 540) % 360) - 180
-
         alpha = 0.3
         self.filtered_heading = (self.filtered_heading + alpha * delta) % 360
         return self.filtered_heading
 
     def heading_change(self, heading, now):
-        """
-        Returns (diff_degrees, slope_deg_per_sec).
-        Uses time between heading samples (not time since last beacon).
-        """
         if heading is None:
             return 0, 0
 
@@ -273,9 +276,6 @@ class SmartBeacon:
         return diff, slope
 
     def _interval_for_speed(self, speed_kmh):
-        """
-        Uses sb_slowSpeed..sb_fastSpeed to interpolate between sb_slowRate..sb_fastRate.
-        """
         slow_spd = float(config.sb_slowSpeed)
         fast_spd = float(config.sb_fastSpeed)
         slow_rate = float(config.sb_slowRate)
@@ -286,7 +286,6 @@ class SmartBeacon:
         if speed_kmh >= fast_spd:
             return fast_rate
 
-        # Linear interpolation
         frac = (speed_kmh - slow_spd) / (fast_spd - slow_spd)
         return slow_rate - frac * (slow_rate - fast_rate)
 
@@ -296,16 +295,13 @@ class SmartBeacon:
 
         # First beacon after boot/fix
         if self.last_lat is None or self.last_lon is None:
-            # Still update heading tracking to avoid giant diff later
             fh = self.filter_heading(heading)
             _ = self.heading_change(fh, now)
             return True
 
-        # If speed is unknown, assume slow
         if speed_kmh is None:
             speed_kmh = 0.0
 
-        # Always update heading tracking (even if we don't act on it)
         fh = self.filter_heading(heading)
         diff, slope = self.heading_change(fh, now)
 
@@ -319,7 +315,7 @@ class SmartBeacon:
         if dt_beacon >= interval:
             return True
 
-        # Corner pegging (limit to not exceed fastRate)
+        # Corner pegging (don't exceed fastRate)
         if (speed_kmh >= float(config.sb_slowSpeed)) and (fh is not None) and (dt_beacon >= float(config.sb_fastRate)):
             if diff >= float(config.sb_turnThreshold):
                 return True
@@ -412,10 +408,6 @@ except Exception as e:
 LORA_HEADER = b"<\xff\x01"
 
 def lora_send_text(text):
-    """
-    Sends one text frame through LoRa with your header.
-    Keeps compatibility with your existing adafruit_rfm9x usage: rfm9x.send(w, payload)
-    """
     w.feed()
     loraLED.value = True
 
@@ -447,7 +439,6 @@ uart = busio.UART(
 
 gps = adafruit_gps.GPS(uart, debug=False)
 
-# GPS 1Hz update (UBX)
 GPS_1HZ = bytes([
     0xB5, 0x62, 0x06, 0x08, 0x06, 0x00,
     0xE8, 0x03, 0x01, 0x00, 0x01, 0x00,
@@ -456,7 +447,6 @@ GPS_1HZ = bytes([
 gps.send_command(GPS_1HZ)
 time.sleep(0.1)
 
-# Disable some UBX messages (reduces CPU/RAM churn)
 DISABLE_UBX = bytes([
     0xB5,0x62,0x06,0x01,0x08,0x00,0x01,0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0xB9,
     0xB5,0x62,0x06,0x01,0x08,0x00,0x01,0x03,0x00,0x00,0x00,0x00,0x00,0x00,0x13,0xC0,
@@ -470,14 +460,12 @@ time.sleep(0.1)
 
 print(yellow("Init Telemetry"))
 
-# Start with: satellites only
 aprsData = [
     "PARM.Satelites",
     "UNIT.Nr",
     "EQNS.0,1,0"
 ]
 
-# Add battery
 if config.voltage:
     for i, t in enumerate(aprsData):
         if t.startswith("PARM"):
@@ -487,7 +475,6 @@ if config.voltage:
         elif t.startswith("EQNS"):
             aprsData[i] += ",0,0.01,0"
 
-# I2C sensors (optional)
 shtc3 = False
 bme680 = False
 i2c_shtc3 = None
@@ -503,7 +490,6 @@ if config.i2cEnabled:
 
         i2c = busio.I2C(scl=board.GP7, sda=board.GP6)
 
-        # Prefer: first device in list
         for dev in config.i2cDevices:
             dev_l = str(dev).lower()
 
@@ -513,7 +499,6 @@ if config.i2cEnabled:
                 shtc3 = True
                 print(green("> SHTC3 OK"))
 
-                # Add 2 channels: Temp/Hum
                 for i, t in enumerate(aprsData):
                     if t.startswith("PARM"):
                         aprsData[i] += ",Temp,Hum"
@@ -530,7 +515,6 @@ if config.i2cEnabled:
                 bme680 = True
                 print(green("> BME680 OK"))
 
-                # Add 2 channels: Temp/Hum
                 for i, t in enumerate(aprsData):
                     if t.startswith("PARM"):
                         aprsData[i] += ",Temp,Hum"
@@ -560,36 +544,72 @@ last_debug_print = time.monotonic()
 last_voltage_warning = 0
 pending_voltage_alert = None
 
-# BME680 first read skip
 skip_first_bme680 = True
 
-# Position freeze (jitter removal)
-frozen_lat = None
-frozen_lon = None
+# Stationary jitter lock (distance-based + hysteresis)
+anchor_lat = None
+anchor_lon = None
+stationary_mode = False
+stationary_exit_hits = 0
 
-# Telemetry metadata daily timer (monotonic seconds)
 last_metadata_send = time.monotonic() - 90000  # ensure metadata soon after boot
 
-def freeze_position_if_stationary(lat, lon, speed_kmh):
-    """Freeze GPS coords when nearly stationary."""
-    global frozen_lat, frozen_lon
+def stabilize_position(raw_lat, raw_lon, speed_kmh):
+    """
+    Reduce stationary GPS jitter:
+      - When stationary_mode is active, output the anchor position.
+      - Exit stationary_mode only when the raw position is >= sb_stationaryDistance
+        for sb_stationaryExitCount consecutive fixes (filters GPS spikes).
+
+    Returns: (lat, lon, stationary_mode, moved_m, started_moving)
+    """
+    global anchor_lat, anchor_lon, stationary_mode, stationary_exit_hits
+
+    started_moving = False
+
+    if raw_lat is None or raw_lon is None:
+        return raw_lat, raw_lon, stationary_mode, 0, started_moving
+
+    if anchor_lat is None or anchor_lon is None:
+        anchor_lat, anchor_lon = raw_lat, raw_lon
+        if speed_kmh is None:
+            speed_kmh = 0.0
+        stationary_mode = (speed_kmh < float(config.sb_stationarySpeed))
+        stationary_exit_hits = 0
+        return raw_lat, raw_lon, stationary_mode, 0, started_moving
+
+    moved_m = distance(anchor_lat, anchor_lon, raw_lat, raw_lon)
+    thresh = int(config.sb_stationaryDistance)
+    need = int(config.sb_stationaryExitCount)
+
+    if stationary_mode:
+        if moved_m >= thresh:
+            stationary_exit_hits += 1
+            if stationary_exit_hits >= need:
+                stationary_mode = False
+                stationary_exit_hits = 0
+                anchor_lat, anchor_lon = raw_lat, raw_lon
+                started_moving = True
+                return raw_lat, raw_lon, stationary_mode, moved_m, started_moving
+
+            # Still stationary until we confirm movement
+            return anchor_lat, anchor_lon, stationary_mode, moved_m, started_moving
+
+        stationary_exit_hits = 0
+        return anchor_lat, anchor_lon, stationary_mode, moved_m, started_moving
+
+    # Not stationary -> follow GPS
+    anchor_lat, anchor_lon = raw_lat, raw_lon
+    stationary_exit_hits = 0
 
     if speed_kmh is None:
         speed_kmh = 0.0
-
     if speed_kmh < float(config.sb_stationarySpeed):
-        if frozen_lat is not None and frozen_lon is not None:
-            return frozen_lat, frozen_lon
-        frozen_lat = lat
-        frozen_lon = lon
-        return lat, lon
+        stationary_mode = True
 
-    frozen_lat = lat
-    frozen_lon = lon
-    return lat, lon
+    return raw_lat, raw_lon, stationary_mode, moved_m, started_moving
 
 def build_and_send_metadata():
-    """Send PARM/UNIT/EQNS (once per day, and shortly after boot)."""
     global last_metadata_send
     last_metadata_send = time.monotonic()
 
@@ -605,7 +625,6 @@ def build_and_send_metadata():
         time.sleep(0.15)
 
 def send_voltage_alert(v_x100):
-    """Send low-voltage alert message."""
     v = v_x100 / 100.0
     msg = "{}>APRFGT::{:9}:Low Voltage ({:.2f}V) detected!".format(
         config.callsign,
@@ -652,10 +671,8 @@ try:
             _ = rtc.RTC()
             if config.fullDebug:
                 print(yellow("RTC updated from GPS"))
-            # Wait one loop so time settles
             continue
 
-        # Ensure GPS has timestamp
         if gps.timestamp_utc is None:
             if config.fullDebug:
                 print(yellow("GPS timestamp not ready…"))
@@ -663,34 +680,43 @@ try:
             continue
 
         # Read GPS data
-        lat = gps.latitude
-        lon = gps.longitude
+        raw_lat = gps.latitude
+        raw_lon = gps.longitude
         alt_m = gps.altitude_m
 
-        heading = gps.track_angle_deg  # may be None
+        heading = gps.track_angle_deg
 
         speed_kmh = None
         if gps.speed_knots is not None:
-            speed_kmh = gps.speed_knots * 1.852  # kt -> km/h
+            speed_kmh = gps.speed_knots * 1.852
 
-        # Freeze jitter when stationary
-        lat, lon = freeze_position_if_stationary(lat, lon, speed_kmh)
+        # Stabilize stationary jitter
+        lat, lon, stationary_mode, jitter_m, started_moving = stabilize_position(
+            raw_lat, raw_lon, speed_kmh
+        )
 
         # Periodic debug print
         now_mono = time.monotonic()
         if now_mono - last_debug_print >= 5:
             last_debug_print = now_mono
-            print(purple("FIX: LAT={:.6f} LON={:.6f} SPD={}km/h HDG={}".format(
-                lat, lon,
-                "{:.1f}".format(speed_kmh) if speed_kmh is not None else "NA",
-                heading if heading is not None else "NA"
-            )))
+            print(purple(
+                "FIX: LAT={:.6f} LON={:.6f} SPD={}km/h HDG={} ST={} JIT={}m".format(
+                    lat, lon,
+                    "{:.1f}".format(speed_kmh) if speed_kmh is not None else "NA",
+                    heading if heading is not None else "NA",
+                    "Y" if stationary_mode else "N",
+                    jitter_m
+                )
+            ))
 
         # SmartBeacon decision
         send_beacon = False
         if config.smartBeaconing:
-            sb_speed = speed_kmh if speed_kmh is not None else 0.0
-            send_beacon = SB.should_beacon(lat, lon, sb_speed, heading)
+            # When stationary_mode is active, force speed=0 so SmartBeacon doesn't "move" from speed noise
+            sb_speed = 0.0 if stationary_mode else (speed_kmh if speed_kmh is not None else 0.0)
+
+            # started_moving forces an immediate beacon when we unlock from stationary
+            send_beacon = started_moving or SB.should_beacon(lat, lon, sb_speed, heading)
         else:
             # Legacy fallback
             dt = now_mono - SB.last_beacon_time
@@ -715,16 +741,15 @@ try:
         else:
             pending_voltage_alert = None
 
-        # Metadata send timer
+        # Metadata timer
         metadata_due = (now_mono - last_metadata_send) >= 86400
 
-        # If nothing to do, idle
+        # Idle
         if (not send_beacon) and (pending_voltage_alert is None) and (not metadata_due):
             time.sleep(0.05)
             continue
 
-        # If metadata is due but we are not sending anything else,
-        # we still send it (small extra TX once/day).
+        # Send metadata even if not beaconing
         if metadata_due and (not send_beacon) and (pending_voltage_alert is None):
             build_and_send_metadata()
             time.sleep(0.05)
@@ -734,7 +759,6 @@ try:
         # SEND POSITION BEACON
         # ------------------------------------------------------------
         if send_beacon:
-            # APRS timestamp (Zulu)
             ts = aprs.makeTimestamp(
                 "z",
                 gps.timestamp_utc.tm_mday,
@@ -743,20 +767,18 @@ try:
                 gps.timestamp_utc.tm_sec,
             )
 
-            # Use -1 when unknown for APRS packet
             spd_for_aprs = speed_kmh if speed_kmh is not None else -1
             hdg_for_aprs = heading if heading is not None else -1
 
             aprs_pos = aprs.makePosition(lat, lon, spd_for_aprs, hdg_for_aprs, config.symbol)
 
-            # Telemetry sequence increment
+            # Telemetry sequence
             sequence = (sequence + 1) % 8192
             try:
                 nvm.save_data(sequence)
             except Exception:
                 pass
 
-            # Build Base91 telemetry payload
             comment = config.comment
             comment += "|" + base91_encode(sequence)
 
@@ -776,7 +798,6 @@ try:
 
             elif bme680 and (i2c_bme680 is not None):
                 if skip_first_bme680:
-                    # skip first read to stabilize
                     skip_first_bme680 = False
                     _ = i2c_bme680.temperature
                     _ = i2c_bme680.relative_humidity
@@ -789,12 +810,10 @@ try:
 
             comment += "|"
 
-            # Altitude
             if alt_m is not None:
                 feet = int(alt_m * 3.2808399)
                 comment += "/A={:06d}".format(feet)
 
-            # Final APRS frame
             frame = "{}>APRFGT:@{}{}{}".format(config.callsign, ts, aprs_pos, comment)
             print(purple("TX: " + frame))
 
@@ -805,13 +824,13 @@ try:
                 print(red("LoRa TX ERROR: " + str(e)))
 
         # ------------------------------------------------------------
-        # SEND METADATA IF DUE (piggyback on beacon)
+        # Send metadata if due
         # ------------------------------------------------------------
         if metadata_due:
             build_and_send_metadata()
 
         # ------------------------------------------------------------
-        # SEND VOLTAGE ALERT IF PENDING
+        # Voltage alert if pending
         # ------------------------------------------------------------
         if pending_voltage_alert is not None:
             send_voltage_alert(pending_voltage_alert)
