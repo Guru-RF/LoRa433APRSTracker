@@ -9,9 +9,9 @@
 # Installation procedure #
 Connect the device to our computer using a UBC-C cable; do not connect the 13.8v Powerpole connector !!!; a drive labeled 'RPI-RP2' will appear. 
 
-[Download the code](https://github.com/Guru-RF/LoRa433APRSTracker/archive/refs/heads/main.zip)
+[Download the code](https://github.com/Guru-RF/LoRa433APRSTracker/releases)
 
-Copy the 'adafruit-circuitpython-raspberry_pi_pico-en_US-9.?.uf2' file to the drive and patiently wait for it to reboot! 
+Copy the 'adafruit-circuitpython-rfguru_rp2040-en_US-10.0.3.uf2' file to the drive and patiently wait for it to reboot! 
 
 Once it restarts, you should see a new drive named 'CIRCUITPY' 
 
