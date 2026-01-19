@@ -59,6 +59,10 @@ Open the device ... press the tiny reset button on the pcb and connect usb-c cab
 
 Follow the installation procedure on top of this page !
 
+# Warnings
+
+Just a quick note: the PA only runs on 13.8 V via the PP45 connector. If you power the unit from USB, the power amplifier is not powered/active, so there will be no amplified output.
+
 # Remarks
 
 lib/adafruit_rfm9x.mpy is heavily modified to work with loraAPRS
