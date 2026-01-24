@@ -31,7 +31,7 @@ RESET = digitalio.DigitalInOut(board.GP20)
 spi = busio.SPI(board.GP18, MOSI=board.GP19, MISO=board.GP16)
 
 # Lora Module
-rfm9x = adafruit_rfm9x.RFM9x(spi, CS, RESET, RADIO_FREQ_MHZ, baudrate=1000000, high_power = True)
+rfm9x = adafruit_rfm9x.RFM9x(spi, CS, RESET, RADIO_FREQ_MHZ, baudrate=1000000)
 rfm9x.tx_power = 23
 
 message = "testsdhkjfklsdhjfklsdjfklsjfklsjfklsfklsdjfklsdjflkjskljskldjflks"
