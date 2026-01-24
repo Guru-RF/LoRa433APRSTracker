@@ -9,7 +9,7 @@
 # Installation procedure #
 Connect the device to our computer using a UBC-C cable; do not connect the 13.8v Powerpole connector !!!; a drive labeled 'RPI-RP2' will appear. 
 
-[Download the code](https://github.com/Guru-RF/LoRa433APRSTracker/releases)
+The stable version is in the V1/ map, the development version in the root
 
 Copy the 'adafruit-circuitpython-rfguru_rp2040-en_US-10.0.3.uf2' file to the drive and patiently wait for it to reboot! 
 
