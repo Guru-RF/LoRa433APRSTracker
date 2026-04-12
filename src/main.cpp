@@ -5,12 +5,13 @@
 // ============================================================
 
 #include <Arduino.h>
-#include <Adafruit_TinyUSB.h>
 #include <FatFS.h>
+#include <FatFSUSB.h>
 #include <EEPROM.h>
 #include <SPI.h>
+#include <SerialPIO.h>
 #include <Wire.h>
-#include <RadioLib.h>
+#include <LoRa.h>
 #include <TinyGPSPlus.h>
 #include <Adafruit_BME680.h>
 #include <Adafruit_SHTC3.h>
@@ -28,15 +29,39 @@
 #define VERSION "RF.Guru_LoRa433APRSTracker 2.0-SB"
 
 // ============================================================
-// USB Mass Storage
+// ANSI Color helpers (matching Python version)
 // ============================================================
 
-Adafruit_USBD_MSC usb_msc;
+// Forward declare gps for timestamp access
+extern TinyGPSPlus gps;
 
-static int32_t msc_read_cb(uint32_t lba, void *buffer, uint32_t bufsize);
-static int32_t msc_write_cb(uint32_t lba, uint8_t *buffer, uint32_t bufsize);
-static void msc_flush_cb(void);
-static bool fs_changed = false;
+// purple: timestamped info (position reports, TX) - uses GPS time when available
+static void purple(const char *msg) {
+    if (gps.time.isValid() && gps.date.isValid() && gps.date.year() >= 2023) {
+        Serial.printf("\x1b[38;5;104m[%02d/%02d/%04d %02d:%02d:%02d] %s\x1b[0m\r\n",
+                      gps.date.month(), gps.date.day(), gps.date.year(),
+                      gps.time.hour(), gps.time.minute(), gps.time.second(), msg);
+    } else {
+        unsigned long s = millis() / 1000;
+        int h = (s / 3600) % 24, m = (s / 60) % 60, sec = s % 60;
+        Serial.printf("\x1b[38;5;104m[%02d:%02d:%02d] %s\x1b[0m\r\n", h, m, sec, msg);
+    }
+}
+
+// yellow: init steps, warnings
+static void yellow(const char *msg) {
+    Serial.printf("\x1b[38;5;220m%s\x1b[0m\r\n", msg);
+}
+
+// red: errors, alerts, boot banner
+static void red(const char *msg) {
+    Serial.printf("\x1b[1;5;31m%s\x1b[0m\r\n", msg);
+}
+
+// green: success messages
+static void green(const char *msg) {
+    Serial.printf("\x1b[1;5;32m%s\x1b[0m\r\n", msg);
+}
 
 // ============================================================
 // Global Objects
@@ -44,14 +69,9 @@ static bool fs_changed = false;
 
 TrackerConfig cfg;
 
-// LoRa via RadioLib (SX1276)
-SPIClassRP2040 loraSPI(spi0, PIN_SPI_MISO, PIN_LORA_CS, PIN_SPI_CLK, PIN_SPI_MOSI);
-// Note: RadioLib wants CS and RST as Module pins
-SX1276 radio = new Module(PIN_LORA_CS, RADIOLIB_NC, PIN_LORA_RST, RADIOLIB_NC, loraSPI);
-
 // GPS
 TinyGPSPlus gps;
-SerialUART gpsSerial(uart0, PIN_GPS_TX, PIN_GPS_RX);
+SerialPIO gpsSerial(PIN_GPS_TX, PIN_GPS_RX, 256);
 
 // I2C Sensors
 Adafruit_BME680 bme680;
@@ -72,7 +92,7 @@ static uint16_t sequence = 0;
 static unsigned long lastDebugPrint = 0;
 static unsigned long lastVoltageWarning = 0;
 static unsigned long lastMetadataSend = 0;
-static bool metadataForced = true;  // force metadata soon after boot
+static bool metadataForced = true;
 
 // GPS LED state
 static bool gpsLock = false;
@@ -137,17 +157,15 @@ static void loraSendText(const char *text) {
     if (cfg.hasPa) {
         digitalWrite(PIN_PA, HIGH);
         delay(250);
+        watchdog_update();
     }
 
-    // Build packet: header + text
-    int textLen = strlen(text);
-    uint8_t *pkt = (uint8_t *)malloc(3 + textLen);
-    if (pkt) {
-        memcpy(pkt, LORA_HEADER, 3);
-        memcpy(pkt + 3, text, textLen);
-        radio.transmit(pkt, 3 + textLen);
-        free(pkt);
-    }
+    LoRa.beginPacket();
+    LoRa.write(LORA_HEADER, 3);
+    LoRa.write((const uint8_t *)text, strlen(text));
+    LoRa.endPacket();
+
+    watchdog_update();
 
     if (cfg.hasPa) {
         delay(100);
@@ -165,7 +183,6 @@ static void loraSendText(const char *text) {
 static bool updateGpsLed(bool hasFix) {
     unsigned long now = millis();
 
-    // Lock/unlock latch with hold timers
     if (hasFix) {
         gpsNoFixSinceValid = false;
         if (!gpsLock) {
@@ -176,7 +193,7 @@ static bool updateGpsLed(bool hasFix) {
             if ((now - gpsFixSince) >= (unsigned long)(cfg.gpsLockHold * 1000)) {
                 gpsLock = true;
                 gpsFixSinceValid = false;
-                Serial.println("[GPS] FIX acquired");
+                green("GPS FIX acquired");
             }
         } else {
             gpsFixSinceValid = false;
@@ -191,7 +208,7 @@ static bool updateGpsLed(bool hasFix) {
             gpsLock = false;
             gpsLastBlink = now - (unsigned long)(cfg.gpsBlinkInterval * 1000);
             gpsPulseUntil = 0;
-            Serial.println("[GPS] FIX lost");
+            yellow("GPS FIX lost");
         }
     }
 
@@ -212,7 +229,7 @@ static bool updateGpsLed(bool hasFix) {
     if (!hasFix) {
         if ((now - gpsLastNoFixLog) >= (unsigned long)(cfg.gpsNoFixLogInterval * 1000)) {
             gpsLastNoFixLog = now;
-            Serial.println("[GPS] No GPS FIX... acquiring lock");
+            yellow("No GPS FIX... acquiring lock");
         }
     }
 
@@ -227,7 +244,7 @@ static void sendMetadata() {
     lastMetadataSend = millis();
     metadataForced = false;
 
-    Serial.println("[TX] Sending telemetry metadata...");
+    yellow("Sending telemetry metadata...");
 
     String metas[] = { metaPARM, metaUNIT, metaEQNS };
     for (int i = 0; i < 3; i++) {
@@ -237,7 +254,9 @@ static void sendMetadata() {
         snprintf(padCall, sizeof(padCall), "%-9s", cfg.callsign);
         snprintf(frame, sizeof(frame), "%s>APRFGT::%s:%s",
                  cfg.callsign, padCall, metas[i].c_str());
-        Serial.printf("[TX] META: %s\n", frame);
+        char buf[256];
+        snprintf(buf, sizeof(buf), "TX META: %s", frame);
+        purple(buf);
         loraSendText(frame);
         delay(150);
     }
@@ -254,26 +273,18 @@ static void sendVoltageAlert(int vx100) {
     snprintf(padCall, sizeof(padCall), "%-9s", cfg.triggerVoltageCall);
     snprintf(frame, sizeof(frame), "%s>APRFGT::%s:Low Voltage (%.2fV) detected!",
              cfg.callsign, padCall, v);
-    Serial.printf("[TX] VOLT ALERT: %s\n", frame);
+    char buf[256];
+    snprintf(buf, sizeof(buf), "TX VOLT ALERT: %s", frame);
+    red(buf);
     loraSendText(frame);
 }
 
 // ============================================================
-// USB MSC Callbacks
+// USB drive ready callback
 // ============================================================
 
-static int32_t msc_read_cb(uint32_t lba, void *buffer, uint32_t bufsize) {
-    return fatfs.readSector(lba, (uint8_t *)buffer, bufsize / 512) ? bufsize : -1;
-}
-
-static int32_t msc_write_cb(uint32_t lba, uint8_t *buffer, uint32_t bufsize) {
-    fs_changed = true;
-    return fatfs.writeSector(lba, buffer, bufsize / 512) ? bufsize : -1;
-}
-
-static void msc_flush_cb(void) {
-    fatfs.syncDevice();
-    fs_changed = true;
+static bool usbDriveReady(uint32_t) {
+    return true;
 }
 
 // ============================================================
@@ -281,9 +292,7 @@ static void msc_flush_cb(void) {
 // ============================================================
 
 void setup() {
-    // Watchdog: 5 seconds
-    watchdog_enable(5000, true);
-    watchdog_update();
+    // No watchdog during init - enable at end of setup()
 
     // LEDs
     pinMode(PIN_LED_PWR, OUTPUT);
@@ -301,46 +310,68 @@ void setup() {
     pinMode(PIN_I2C_PWR, OUTPUT);
     digitalWrite(PIN_I2C_PWR, LOW);
 
-    // GPS reset
+    // GPS reset (hold low 1s, then high 1s - same as Python boot.py)
     pinMode(PIN_GPS_RST, OUTPUT);
     digitalWrite(PIN_GPS_RST, LOW);
-    delay(100);
-    watchdog_update();
+    delay(1000);
     digitalWrite(PIN_GPS_RST, HIGH);
-    delay(100);
-    watchdog_update();
+    delay(1000);
 
     // USB Serial
     Serial.begin(115200);
-
-    // Init FAT filesystem
-    fatfs.begin();
-    watchdog_update();
-
-    // USB Mass Storage
-    usb_msc.setID("RF.Guru", "APRSTracker", "2.0");
-    usb_msc.setReadWriteCallback(msc_read_cb, msc_write_cb, msc_flush_cb);
-    usb_msc.setCapacity(fatfs.sectorCount(), 512);
-    usb_msc.setUnitReady(true);
-    usb_msc.begin();
-
     delay(2000);
-    watchdog_update();
 
-    Serial.println();
-    Serial.println("============================================================");
-    Serial.printf(" -- Tracker Booted: %s\n", VERSION);
-    Serial.println("============================================================");
+    Serial.print("\r\n");
 
-    // Load config from filesystem
+    char banner[128];
+    snprintf(banner, sizeof(banner), " -- Tracker Booted: %s -=- %s", cfg.callsign, VERSION);
+    red(banner);
+
+    // Init FAT filesystem and do all file ops BEFORE starting USB drive
+    if (!FatFS.begin()) {
+        red("FatFS init failed!");
+        while (true) delay(1000);
+    }
+    fatfs::f_setlabel("APRSTRKR");
+
+    // Load config (creates default if missing)
     if (!configLoad(cfg)) {
-        Serial.println("[CONFIG] Using defaults");
+        yellow("Using default configuration");
         configSetDefaults(cfg);
         configApplyProfile(cfg);
     }
 
-    Serial.printf("[CONFIG] Callsign: %s  Profile: %s\n", cfg.callsign, cfg.profile);
-    Serial.println("[CONFIG] SmartBeaconing: ON");
+    // Check for firmware update trigger
+    File cfgFile = FatFS.open("/config.txt", "r");
+    if (cfgFile) {
+        String content;
+        while (cfgFile.available()) content += (char)cfgFile.read();
+        cfgFile.close();
+        content.trim();
+        if (content == "firmwareupdate") {
+            red("Firmware update requested!");
+            FatFS.remove("/config.txt");
+            delay(500);
+            red("Rebooting into UF2 bootloader...");
+            delay(500);
+            reset_usb_boot(0, 0);
+            while (true);
+        }
+    }
+
+    // Start USB mass storage (after all file operations)
+    FatFSUSB.onUnplug([](uint32_t) { rp2040.reboot(); });
+    FatFSUSB.driveReady(usbDriveReady);
+    FatFSUSB.begin();
+    green("USB mass storage active");
+
+    // Print config summary
+    snprintf(banner, sizeof(banner), " -- Tracker Booted: %s -=- %s", cfg.callsign, VERSION);
+    red(banner);
+
+    char cfgMsg[128];
+    snprintf(cfgMsg, sizeof(cfgMsg), "SmartBeaconing: ON  Profile: %s", cfg.profile);
+    yellow(cfgMsg);
 
     // ADC setup
     analogReadResolution(16);
@@ -351,27 +382,33 @@ void setup() {
     if (stored > 0 && stored <= 8191) {
         sequence = stored;
     }
-    Serial.printf("[SEQ] Start at: %d\n", sequence);
+    snprintf(cfgMsg, sizeof(cfgMsg), "Sequence start at: %d", sequence);
+    yellow(cfgMsg);
 
     // LoRa init
-    Serial.println("[LORA] Initializing...");
-    loraSPI.begin();
+    yellow("Init LoRa");
+    SPI.setRX(PIN_SPI_MISO);
+    SPI.setTX(PIN_SPI_MOSI);
+    SPI.setSCK(PIN_SPI_CLK);
 
-    int state = radio.begin(cfg.loraFrequency, 125.0, 12, 5, RADIOLIB_SX127X_SYNC_WORD, cfg.power);
-    if (state != RADIOLIB_ERR_NONE) {
-        Serial.printf("[LORA] INIT ERROR: %d\n", state);
-        while (true) {
-            watchdog_update();
-            delay(1000);
-        }
+    LoRa.setPins(PIN_LORA_CS, PIN_LORA_RST, -1);
+    LoRa.setSPI(SPI);
+
+    if (!LoRa.begin((long)(cfg.loraFrequency * 1E6))) {
+        red("LoRa INIT ERROR");
+        while (true) { delay(1000); }
     }
-    // LoRa APRS settings: explicit header, CRC on
-    radio.explicitHeader();
-    radio.setCRC(true);
-    Serial.printf("[LORA] OK (freq=%.3f MHz, pwr=%d dBm)\n", cfg.loraFrequency, cfg.power);
+    LoRa.setTxPower(cfg.power);
+    LoRa.enableCrc();
+    LoRa.setSpreadingFactor(12);
+    LoRa.setSignalBandwidth(125000);
+    LoRa.setSyncWord(0x12);
+
+    snprintf(cfgMsg, sizeof(cfgMsg), "LoRa OK (freq = %.3f MHz, pwr = %d dBm)", cfg.loraFrequency, cfg.power);
+    green(cfgMsg);
 
     // GPS init
-    Serial.println("[GPS] Initializing...");
+    yellow("Init GPS");
     gpsSerial.begin(9600);
 
     // Set GPS to 1Hz
@@ -392,40 +429,41 @@ void setup() {
     };
     gpsSerial.write(disableUbx, sizeof(disableUbx));
     delay(100);
-    watchdog_update();
+
+    green("GPS OK");
 
     // I2C sensors
     if (cfg.i2cEnabled) {
-        Serial.println("[I2C] Initializing sensors...");
+        yellow("Init I2C sensors");
         digitalWrite(PIN_I2C_PWR, HIGH);
-        watchdog_update();
-        delay(2000);
-        watchdog_update();
+        delay(500);
 
-        Wire.setSDA(PIN_I2C_SDA);
-        Wire.setSCL(PIN_I2C_SCL);
-        Wire.begin();
+        Wire1.setSDA(PIN_I2C_SDA);
+        Wire1.setSCL(PIN_I2C_SCL);
+        Wire1.setClock(100000);
+        Wire1.begin();
 
         if (strcasecmp(cfg.i2cDevice, "BME680") == 0) {
-            if (bme680.begin(0x77, &Wire)) {
+            if (bme680.begin(0x77, &Wire1)) {
                 hasBME680 = true;
                 bme680.setTemperatureOversampling(BME680_OS_8X);
                 bme680.setHumidityOversampling(BME680_OS_2X);
                 bme680.setPressureOversampling(BME680_OS_4X);
-                Serial.println("[I2C] BME680 OK");
+                green("> BME680 OK");
             } else {
-                Serial.println("[I2C] BME680 not found");
+                yellow("> BME680 not found, continuing");
             }
         } else if (strcasecmp(cfg.i2cDevice, "SHTC3") == 0) {
-            if (shtc3.begin(&Wire)) {
+            if (shtc3.begin(&Wire1)) {
                 hasSHTC3 = true;
-                Serial.println("[I2C] SHTC3 OK");
+                green("> SHTC3 OK");
             } else {
-                Serial.println("[I2C] SHTC3 not found");
+                yellow("> SHTC3 not found, continuing");
             }
         }
 
         if (!hasBME680 && !hasSHTC3) {
+            yellow("No sensors found, continuing without");
             digitalWrite(PIN_I2C_PWR, LOW);
         }
     }
@@ -440,8 +478,10 @@ void setup() {
     // Init GPS LED timing
     gpsLastBlink = millis() - (unsigned long)(cfg.gpsBlinkInterval * 1000);
 
-    Serial.println("[TRACKER] Ready, entering main loop");
-    watchdog_update();
+    // NOW enable watchdog (5 sec) - setup is done
+    watchdog_enable(5000, true);
+
+    yellow("Start Tracking");
 }
 
 // ============================================================
@@ -457,7 +497,7 @@ void loop() {
     }
 
     // Check if we have a valid fix
-    bool hasFix = gps.location.isValid() && gps.location.isUpdated();
+    bool hasFix = gps.location.isValid() && gps.location.age() < 3000;
 
     // Update GPS LED (always)
     if (!updateGpsLed(hasFix)) {
@@ -468,7 +508,7 @@ void loop() {
     // Need valid date/time
     if (!gps.date.isValid() || gps.date.year() < 2023) {
         if (cfg.fullDebug) {
-            Serial.println("[GPS] Waiting for valid date/time...");
+            yellow("GPS timestamp not ready");
         }
         delay(50);
         return;
@@ -494,12 +534,15 @@ void loop() {
     unsigned long nowMs = millis();
     if ((nowMs - lastDebugPrint) >= 5000) {
         lastDebugPrint = nowMs;
-        Serial.printf("[FIX] LAT=%.6f LON=%.6f SPD=%.1fkm/h HDG=%.0f ST=%s JIT=%.0fm\n",
-                      lat, lon,
-                      speedKmh >= 0 ? speedKmh : 0,
-                      heading >= 0 ? heading : 0,
-                      jitter.isStationary() ? "Y" : "N",
-                      movedM);
+        char buf[200];
+        snprintf(buf, sizeof(buf),
+                 "FIX: LAT=%.6f LON=%.6f SPD=%.1fkm/h HDG=%.0f ST=%s JIT=%.0fm",
+                 lat, lon,
+                 speedKmh >= 0 ? speedKmh : 0,
+                 heading >= 0 ? heading : 0,
+                 jitter.isStationary() ? "Y" : "N",
+                 movedM);
+        purple(buf);
     }
 
     // Determine whether to beacon
@@ -518,7 +561,9 @@ void loop() {
             if ((nowMs - lastVoltageWarning) > (unsigned long)cfg.triggerVoltageKeepalive * 1000UL) {
                 lastVoltageWarning = nowMs;
                 pendingVoltAlert = vx100;
-                Serial.printf("[VOLT] LOW: %.2fV\n", vx100 / 100.0f);
+                char buf[64];
+                snprintf(buf, sizeof(buf), "LOW VOLTAGE: %.2fV", vx100 / 100.0f);
+                yellow(buf);
             }
         }
     }
@@ -543,11 +588,9 @@ void loop() {
     // SEND POSITION BEACON
     // ============================================================
     if (sendBeacon) {
-        // Timestamp
         char ts[8];
         aprsTimestamp(ts, 'z', gps.date.day(), gps.time.hour(), gps.time.minute(), gps.time.second());
 
-        // Position
         char aprsPos[20];
         float spdForAprs = speedKmh >= 0 ? speedKmh : -1;
         float hdgForAprs = heading >= 0 ? heading : -1;
@@ -620,7 +663,9 @@ void loop() {
         snprintf(frame, sizeof(frame), "%s>APRFGT:@%s%s%s",
                  cfg.callsign, ts, aprsPos, comment);
 
-        Serial.printf("[TX] %s\n", frame);
+        char buf[350];
+        snprintf(buf, sizeof(buf), "TX: %s", frame);
+        purple(buf);
         loraSendText(frame);
         sb.updateAfterBeacon(lat, lon);
     }

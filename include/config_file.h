@@ -8,6 +8,8 @@
 #include <Arduino.h>
 #include <FatFS.h>
 
+extern FS FatFS;
+
 // Config defaults
 #define DEFAULT_CALLSIGN      "ON9RFG"
 #define DEFAULT_SYMBOL        "L>"
@@ -244,27 +246,50 @@ static const char *CONFIG_TEMPLATE =
     "fullDebug=false\n";
 
 static bool configCreateDefault() {
-    File f = fatfs.open("/config.txt", "w");
-    if (!f) return false;
-    f.print(CONFIG_TEMPLATE);
+    File f = FatFS.open("/config.txt", "w");
+    if (!f) {
+        Serial.println("[CONFIG] ERROR: Could not create file");
+        return false;
+    }
+    // Write line by line to avoid large buffer issues
+    f.println("# RF.Guru LoRa 433 APRS Tracker Configuration");
+    f.println("# Edit this file and reboot/eject the device to apply");
+    f.println("");
+    f.println("profile=car");
+    f.println("callsign=ON9RFG");
+    f.println("symbol=L>");
+    f.println("comment=https://RF.Guru");
+    f.println("power=23");
+    f.println("hasPa=true");
+    f.println("loraFrequency=433.775");
+    f.println("");
+    f.println("voltage=true");
+    f.println("triggerVoltage=true");
+    f.println("triggerVoltageLevel=1200");
+    f.println("triggerVoltageCall=ON9RFG");
+    f.println("triggerVoltageKeepalive=3600");
+    f.println("");
+    f.println("i2cEnabled=true");
+    f.println("i2cDevice=BME680");
+    f.println("bme680TempOffset=0");
+    f.println("");
+    f.println("fullDebug=false");
     f.close();
+    Serial.println("[CONFIG] Default config.txt created");
     return true;
 }
 
 static bool configLoad(TrackerConfig &cfg) {
     configSetDefaults(cfg);
 
-    if (!fatfs.exists("/config.txt")) {
+    if (!FatFS.exists("/config.txt")) {
         Serial.println("[CONFIG] No config.txt found, creating default...");
-        if (!configCreateDefault()) {
-            Serial.println("[CONFIG] ERROR: Could not create config.txt!");
-            return false;
-        }
+        configCreateDefault();
     }
 
-    File f = fatfs.open("/config.txt", "r");
+    File f = FatFS.open("/config.txt", "r");
     if (!f) {
-        Serial.println("[CONFIG] ERROR: Could not open config.txt!");
+        Serial.println("[CONFIG] ERROR: Could not read config.txt");
         return false;
     }
 

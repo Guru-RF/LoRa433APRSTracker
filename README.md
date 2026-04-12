@@ -1,10 +1,6 @@
 # LoRA APRS Tracker Automotive 13.8v
 
-[Assembled - RF.Guru LoRA APRS Tracker Automotive 433Mhz](https://shop.rf.guru/products/2023-pa-521) 512mW Power
-
-[Kit - RF.Guru LoRA APRS Tracker Automotive 433Mhz](https://shop.rf.guru/products/2023-k-521) 512mW Power
-
-[PCB - RF.Guru LoRA APRS Tracker Automotive 433Mhz](https://shop.rf.guru/products/2023-p-521) 512mW Power
+[Assembled - RF.Guru LoRA APRS Tracker Automotive 433Mhz](https://shop.rf.guru/products/13-8v-lora-aprs-automotive-tracker-433-mhz) 400mW Power
 
 # Firmware
 
@@ -24,10 +20,12 @@ pio run
 
 Connect the device via USB-C (do not connect 13.8v Powerpole).
 
-To enter UF2 bootloader mode, use `reset.py` or hold the reset button while connecting USB-C:
+To enter UF2 bootloader mode, use `reset.sh` or hold the reset button while connecting USB-C.
+
+The script creates a venv and installs pyserial automatically:
 
 ```console
-python3 reset.py /dev/tty.usbmodem*
+./reset.sh /dev/tty.usbmodem*
 ```
 
 Then copy the firmware:
