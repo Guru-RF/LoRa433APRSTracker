@@ -468,8 +468,9 @@ void setup() {
         }
     }
 
-    // Build telemetry metadata
+    // Build and send telemetry metadata immediately (PA test - no GPS needed)
     buildMetadata();
+    sendMetadata();
 
     // Init beacon engine
     sb.reset();
