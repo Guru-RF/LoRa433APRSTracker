@@ -1,0 +1,40 @@
+# ============================================================
+# RF.Guru LoRa 433 APRS Tracker Configuration
+# Edit this file and reboot the device to apply changes
+# ============================================================
+
+# Profile: car, bike, or hiker (sets SmartBeacon parameters)
+profile=car
+
+# Callsign (APRS)
+callsign=ON9RFG
+
+# APRS symbol (2 chars: table + code, e.g. L> = LoRa car)
+symbol=L>
+
+# APRS comment appended to position reports
+comment=https://RF.Guru
+
+# TX power (5-23 dBm)
+power=23
+
+# Power amplifier present
+hasPa=true
+
+# LoRa frequency (MHz)
+loraFrequency=433.775
+
+# --- Voltage Monitoring ---
+voltage=true
+triggerVoltage=true
+triggerVoltageLevel=1200
+triggerVoltageCall=ON9RFG
+triggerVoltageKeepalive=3600
+
+# --- I2C Sensors ---
+i2cEnabled=true
+i2cDevice=BME680
+bme680TempOffset=0
+
+# --- Debug ---
+fullDebug=false

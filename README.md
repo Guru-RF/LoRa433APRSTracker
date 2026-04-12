@@ -6,18 +6,59 @@
 
 [PCB - RF.Guru LoRA APRS Tracker Automotive 433Mhz](https://shop.rf.guru/products/2023-p-521) 512mW Power
 
-# Installation procedure #
-Connect the device to our computer using a UBC-C cable; do not connect the 13.8v Powerpole connector !!!; a drive labeled 'RPI-RP2' will appear. 
+# Firmware
 
-The stable version is in the V1/ map, the development version in the root
+Built with PlatformIO (Arduino C++ for RP2040).
 
-Copy the 'adafruit-circuitpython-rfguru_rp2040-en_US-10.0.3.uf2' file to the drive and patiently wait for it to reboot! 
+The stable CircuitPython version is preserved in `V1/`.
 
-Once it restarts, you should see a new drive named 'CIRCUITPY' 
+# Installation
 
-Transfer the library folder (src/lib), followed by the src/boot.py file. Adjust the settings in the src/config.py (modify call/settings) and transfer it to the 'CIRCUITPY' drive. 
+## Building
 
-Finally, transfer the src/code.py file!
+```console
+pio run
+```
+
+## Flashing
+
+Connect the device via USB-C (do not connect 13.8v Powerpole).
+
+To enter UF2 bootloader mode, use `reset.py` or hold the reset button while connecting USB-C:
+
+```console
+python3 reset.py /dev/tty.usbmodem*
+```
+
+Then copy the firmware:
+
+```console
+cp .pio/build/pico/firmware.uf2 /Volumes/RPI-RP2/
+```
+
+## Uploading Filesystem (first time)
+
+Upload the default config to the device filesystem:
+
+```console
+pio run --target uploadfs
+```
+
+## Configuration
+
+After flashing, the device presents as a USB drive. Edit `config.txt` on the drive to configure:
+
+- **callsign** - Your APRS callsign
+- **profile** - SmartBeacon profile: `car`, `bike`, or `hiker`
+- **power** - TX power 5-23 dBm
+- **triggerVoltageCall** - Callsign to alert on low voltage
+- And more (see comments in config.txt)
+
+Reboot after editing.
+
+## Factory Reset
+
+Copy `flash_nuke.uf2` to the RPI-RP2 drive to erase all flash, then reflash firmware.
 
 <img width="938" alt="TrackerTOP" src="https://github.com/Guru-RF/LoraAPRStracker/assets/1251767/c3a32cc5-92fe-420b-a335-53400f411a51">
 <img width="1076" alt="TrackerBottom" src="https://github.com/Guru-RF/LoraAPRStracker/assets/1251767/2ef5376d-9d41-4aac-892e-fea3d2fedd85">
@@ -40,36 +81,6 @@ tio /dev/tty....
 
 ![console cast](https://github.com/Guru-RF/LoRa433APRSTracker/assets/1251767/6fd05385-3f13-4b30-8b80-1ce499a2039c)
 
-# Resetting to factory defaults
-
-Via the console ... press control-c and past this
-
-```console
-import microcontroller
-microcontroller.on_next_reset(microcontroller.RunMode.UF2)
-microcontroller.reset()
-```
-
-Follow the installation procedure on top of this page !
-
-# Reset by hand
-
-As a last restort !
-Open the device ... press the tiny reset button on the pcb and connect usb-c cable whilst pressing the reset button.
-
-Follow the installation procedure on top of this page !
-
 # Warnings
 
 Just a quick note: the PA only runs on 13.8 V via the PP45 connector. If you power the unit from USB, the power amplifier is not powered/active, so there will be no amplified output.
-
-# Remarks
-
-lib/adafruit_rfm9x.mpy is heavily modified to work with loraAPRS
-you can find the modifications here:
-https://github.com/Guru-RF/RF_Guru_RFM9x
-
-lib/APRS.mpy:
-you can find the uber minimalistic APRS lib over here
-https://github.com/Guru-RF/circuitpython-APRS
-
