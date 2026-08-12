@@ -155,4 +155,12 @@ The console shows colored output with GPS status, LoRa TX frames, and voltage mo
 
 # Warnings
 
-The PA only runs on 13.8V via the PP45 connector. If you power the unit from USB, the power amplifier is not powered/active, so there will be no amplified output.
+**V1 boards:** the PA only runs on 13.8V via the PP45 connector. If you
+power the unit from USB, the power amplifier is not powered/active, so
+there will be no amplified output.
+
+**V2 boards:** the amplifier is inside the radio module and is fed from
+the on-board buck regulator, so full output is available on USB-C as
+well as on the Powerpole. Do not connect both at once.
+
+Never transmit without an antenna or a 50 ohm dummy load on the SMA.
