@@ -48,7 +48,7 @@ After flashing, the device presents as a USB drive with a `config.txt` file. Edi
 
 - **callsign** - Your APRS callsign (e.g. `ON9RFG-1`)
 - **profile** - SmartBeacon profile: `car`, `bike`, or `hiker`
-- **power** - TX power 5-23 dBm
+- **power** - TX power in dBm (bare modules; see below for V2)
 - **triggerVoltageCall** - Callsign to alert on low voltage
 - **loraFrequency** - LoRa frequency in MHz (default 433.775)
 - **i2cEnabled** - Enable I2C sensors (`true`/`false`)
@@ -56,36 +56,40 @@ After flashing, the device presents as a USB drive with a `config.txt` file. Edi
 - **radioChip** - `auto` (detect), or force `sx1276` / `sx1262`
 - **loraTcxo** - SX1262 clock: `auto` (probe), `0` for a crystal, or the
   TCXO supply voltage such as `1.8` / `3.3`
+- **paDrive** - chip dBm into a module PA, -9..22 (V2 only)
+- **gpsBaud** - `0` to detect, or pin it (`9600` / `115200`)
 
 ### What `power` means depends on the board
 
 On **V1** it is the chip's output power in dBm, capped at +20.
 
-On **V2** the module has its own amplifier, so the chip's output is a
-*drive level* into that amplifier, not the radiated power. The MiniF27
-datasheet only characterises drive levels 0-9, so the firmware clamps to
-that range — driving the chip to +22 dBm as a bare SX1262 would be is
-13 dB past the top of the table and hard-compresses the amplifier.
-Measured at the antenna pad (datasheet §8, VCC_PA = 4 V):
+On **V2** the module has its own amplifier, so the chip's output is the
+*drive* into that amplifier rather than the radiated power. That has its
+own key, `paDrive`, in dBm from -9 to 22, and `power` is ignored.
 
-| Drive | Antenna port | Current |
-|-------|--------------|---------|
-| 0     | 9.8 dBm      | 110 mA  |
-| 4     | 20.9 dBm     | 200 mA  |
-| 9     | 28.7 dBm     | 460 mA  |
+`paDrive` defaults to 22 — the die's maximum — because that is what the
+module needs for its rated output. The datasheet's "Chip Output Level
+0..9" column is an index across the die's range, not a figure in dBm;
+reading it as dBm implies the module's gain grows by 10 dB with drive,
+which no amplifier does. Bench measurement confirmed the index reading:
+full die drive gave the highest output, and the current draw then
+matched the datasheet's efficiency.
 
-`paDrive` sets this and defaults to 9. `power` is a dBm figure and means
-nothing to an amplifier driven by an index, so it is ignored on V2 and
-the boot log says so.
+What actually reaches the antenna depends on VCC_PA (26.6 dBm at 3.3 V
+rising to 29.8 dBm at 5.0 V) and on the filtering after the module, so
+the firmware reports what it programmed rather than predicting power it
+cannot measure.
 
-The table above is the datasheet's VCC_PA = 4 V column, which matches
-this board: VCCFILTER is 4.85 V behind a 1N4007F, leaving roughly 4.05 V
-at full drive. The figure in the boot log is still an estimate — the
-drive level is what is actually programmed. On V2 the module output
-reaches the SMA through a harmonic low-pass filter, so there is no
-second amplifier in the chain.
+Two hardware notes for anyone chasing output power on a V2 board:
 
-Eject the USB drive to apply changes (device reboots automatically).
+- The series diode feeding VCC_PA costs whatever it drops. A PN part
+  such as a 1N4007F takes ~0.8 V at these currents; the SS34F the
+  schematic specifies takes ~0.3 V, worth roughly 1 dB.
+- The ESD part on the antenna port must clear the RF swing. 800 mW into
+  50 ohm is 8.9 V peak, so a 5 V TVS clamps the transmitter and caps
+  output regardless of drive. Use a part that stays out of the way — a
+  polymer suppressor such as the Littelfuse PGB1010402KR is 0.04 pF and
+  does not conduct until hundreds of volts.
 
 ## Firmware Update
 
@@ -110,8 +114,9 @@ The firmware will be at `.pio/build/pico/firmware.uf2`.
 
 ## Hardware diagnostics
 
-`tools/chipprobe/` holds two standalone firmwares for bringing up a new
-board. Neither transmits or enables the external PA.
+`tools/chipprobe/` holds several standalone firmwares for bringing up a
+new board. Only the `-tx` and `cwtest` builds transmit; the rest are
+passive and never enable the PA.
 
 ```console
 cd tools/chipprobe
@@ -124,6 +129,13 @@ pio run -e probe
 # Run the tracker's real radio boot path and read the settings back out
 # of the chip, without keying up.
 pio run -e radiotest
+
+# Survey the GPS: sweep baud rates, dump raw NMEA, tally talker IDs.
+pio run -e gpsdump
+
+# Hold a carrier at a series of PA settings so a power meter has
+# something steady to read. Antenna or dummy load required.
+pio run -e cwtest
 ```
 
 Flash either with `picotool load -x .pio/build/<env>/firmware.uf2`.

@@ -37,9 +37,10 @@ extern FS FatFS;
 // Radio module type: "auto" uses the board strap, "minif27" for the
 // G-NiceRF 1262MiniF27 with its internal PA, "bare" for a plain module.
 #define DEFAULT_RADIO_MODULE  "auto"
-// Drive level into a module's internal PA, 0..9. Only used on module-PA
-// boards, where it replaces `power` entirely. 9 is full output.
-#define DEFAULT_PA_DRIVE      9
+// SX1262 output power in dBm driving a module's internal amplifier,
+// -9..22. Only used on module-PA boards, where it replaces `power`
+// entirely. Rated module output needs the die at its maximum.
+#define DEFAULT_PA_DRIVE      22
 // GPS UART baud. 0 = detect (V1 u-blox is 9600, V2 ATGM336H is 115200).
 #define DEFAULT_GPS_BAUD      0
 
@@ -223,7 +224,7 @@ static void configSetValue(TrackerConfig &cfg, const char *key, const char *val)
     } else if (strcasecmp(key, "radioModule") == 0) {
         strncpy(cfg.radioModule, val, sizeof(cfg.radioModule) - 1);
     } else if (strcasecmp(key, "paDrive") == 0) {
-        cfg.paDrive = constrain(atoi(val), 0, 9);
+        cfg.paDrive = constrain(atoi(val), -9, 22);
     } else if (strcasecmp(key, "gpsBaud") == 0) {
         cfg.gpsBaud = atol(val);
     } else if (strcasecmp(key, "gpsBlinkInterval") == 0) {
@@ -275,8 +276,8 @@ static const char *CONFIG_TEMPLATE =
     "# Radio module: auto, minif27 (internal PA) or bare\n"
     "radioModule=auto\n"
     "\n"
-    "# PA drive 0-9 on module-PA boards (9 = full output, ~28.7 dBm)\n"
-    "paDrive=9\n"
+    "# Chip dBm driving the module PA, -9..22 (22 = rated output)\n"
+    "paDrive=22\n"
     "\n"
     "# GPS baud: 0 = detect, or pin it (9600 u-blox, 115200 ATGM336H)\n"
     "gpsBaud=0\n"
@@ -320,8 +321,8 @@ static bool configCreateDefault() {
     f.println("loraTcxo=auto");
     f.println("# Radio module: auto, minif27 (internal PA) or bare");
     f.println("radioModule=auto");
-    f.println("# PA drive 0-9 on module-PA boards (9 = full output, ~28.7 dBm)");
-    f.println("paDrive=9");
+    f.println("# Chip dBm driving the module PA, -9..22 (22 = rated output)");
+    f.println("paDrive=22");
     f.println("# GPS baud: 0 = detect, or pin it (9600 u-blox, 115200 ATGM336H)");
     f.println("gpsBaud=0");
     f.println("");

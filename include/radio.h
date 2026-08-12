@@ -51,13 +51,10 @@ bool hasModulePa();
 
 // Power actually programmed into the chip, after clamping. On a bare
 // module this is the output power (SX1276 tops out at +20 dBm, SX1262
-// at +22 dBm). On a MiniF27 it is the PA drive level, 0..9.
+// at +22 dBm). On a module with its own amplifier it is the drive into
+// that amplifier, and what reaches the antenna depends on VCC_PA and
+// the filtering downstream - measure it, do not predict it.
 int8_t appliedPower();
-
-// Expected power at the antenna port, in tenths of a dBm. Equals
-// appliedPower() * 10 on a bare module; on a MiniF27 it comes from the
-// drive-level table in the module datasheet.
-int16_t antennaPowerDeciDbm();
 
 // TCXO supply voltage the SX126x was brought up with, 0.0 for a plain
 // crystal module.

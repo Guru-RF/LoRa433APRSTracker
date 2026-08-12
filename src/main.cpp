@@ -558,12 +558,10 @@ void setup() {
         yellow(cfgMsg);
     }
 
-    int16_t antDeci = TrackerRadio::antennaPowerDeciDbm();
     if (TrackerRadio::hasModulePa()) {
         snprintf(cfgMsg, sizeof(cfgMsg),
-                 "LoRa OK (%.3f MHz, PA drive %d -> %d.%d dBm out, SF12/BW125/CR4:5)",
-                 cfg.loraFrequency, TrackerRadio::appliedPower(),
-                 antDeci / 10, abs(antDeci % 10));
+                 "LoRa OK (%.3f MHz, chip %d dBm into module PA, SF12/BW125/CR4:5)",
+                 cfg.loraFrequency, TrackerRadio::appliedPower());
     } else {
         snprintf(cfgMsg, sizeof(cfgMsg),
                  "LoRa OK (%.3f MHz, pwr = %d dBm, SF12/BW125/CR4:5)",
@@ -572,11 +570,10 @@ void setup() {
     green(cfgMsg);
 
     if (TrackerRadio::hasModulePa()) {
-        // `power` is a dBm figure and means nothing to an amplifier
-        // driven by a 0-9 index, so paDrive owns the output here. Say so
-        // rather than letting a stale power= line look effective.
+        // paDrive owns the output here; say so rather than letting a
+        // stale power= line look effective.
         snprintf(cfgMsg, sizeof(cfgMsg),
-                 "> paDrive=%d sets the output; power=%d is unused on this module",
+                 "> paDrive=%d sets the drive; power=%d is unused on this module",
                  TrackerRadio::appliedPower(), cfg.power);
         yellow(cfgMsg);
     } else if (TrackerRadio::appliedPower() != cfg.power) {

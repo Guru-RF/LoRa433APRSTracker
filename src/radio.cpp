@@ -38,36 +38,27 @@ static const float   LORA_OCP_SX126X_MA = 140.0f;
 // ------------------------------------------------------------
 // G-NiceRF 1262MiniF27 (V2 boards)
 //
-// The module is an SX1262 followed by an internal power amplifier, so
-// the chip's output is a *drive level* into that PA, not the radiated
-// power. The datasheet (Rev 1.2, section 8, at VCC_PA = 4 V) tabulates
-// drive level against what actually leaves the antenna pad:
+// The module is an SX1262 die followed by an internal power amplifier,
+// so the chip's output is the drive into that amplifier rather than the
+// radiated power - the module turns roughly +22 dBm of die output into
+// ~29 dBm at the antenna pad.
 //
-//   drive 0 -> 9.8 dBm @110 mA        drive 5 -> 22.9 dBm @250 mA
-//   drive 1 -> 12.8 dBm @120 mA       drive 6 -> 25.7 dBm @330 mA
-//   drive 2 -> 14.8 dBm @130 mA       drive 7 -> 27.1 dBm @400 mA
-//   drive 3 -> 17.5 dBm @155 mA       drive 8 -> 28.2 dBm @440 mA
-//   drive 4 -> 20.9 dBm @200 mA       drive 9 -> 28.7 dBm @460 mA
+// The datasheet's "Chip Output Level 0..9" column is an index across
+// the die's range, NOT a figure in dBm. Reading it as dBm implies the
+// module's gain grows from 9.8 dB at level 0 to 19.7 dB at level 9,
+// which no amplifier does; as an index it is ordinary compression.
+// Measurement settled it: driving the die to its full +22 dBm produced
+// the highest output on a bench sweep and the current draw then matched
+// the datasheet's efficiency (~42% measured against ~40% published).
+// Clamping to "9 dBm" instead cost about 4 dB.
 //
-// The table stops at 9. Driving the chip to +22 dBm, which is what a
-// bare SX1262 would be set to for full output, is 13 dB past the top of
-// it and hard-compresses the amplifier.
-//
-// These figures are the datasheet's VCC_PA = 4 V column, which is the
-// right one for this board: VCCFILTER is 4.85 V behind a 1N4007F, whose
-// forward drop puts the rail at roughly 4.05 V at the 460 mA of drive 9
-// and 4.2 V at the 110 mA of drive 0. The curve does move with that
-// supply (26.6 dBm at 3.3 V, 29.8 at 5.0), so antennaPowerDeciDbm()
-// stays an estimate for the log line - what is actually programmed is
-// the drive level.
-//
-// On the V2 board the module output goes straight to a harmonic
-// low-pass filter and the SMA (with a sub-pF ESD TVS); there is no
-// second amplifier in the chain.
-static const int8_t  MINIF27_MAX_DRIVE = 9;
-static const int16_t MINIF27_OUT_DECIDBM[MINIF27_MAX_DRIVE + 1] = {
-    98, 128, 148, 175, 209, 229, 257, 271, 282, 287
-};
+// So paDrive is the die's output power in dBm and wants to be at the
+// maximum for rated output. What actually leaves the antenna depends on
+// VCC_PA (26.6 dBm at 3.3 V rising to 29.8 dBm at 5.0 V) and on the
+// filtering after the module, so the firmware does not try to predict
+// it - it reports what it programmed.
+static const int8_t MINIF27_MIN_DRIVE = -9;
+static const int8_t MINIF27_MAX_DRIVE = 22;
 
 // SPI clock used for both the raw probe and RadioLib.
 static const uint32_t LORA_SPI_HZ = 2000000;
@@ -439,13 +430,11 @@ bool TrackerRadio::begin(const TrackerConfig &cfg, char *err, size_t errLen) {
         // otherwise, and RadioLib's SX1262 class refuses to start on one.
         bool is1268 = (strncmp(sx126xVersion, "SX1268", 6) == 0);
 
-        // On a module with its own amplifier the chip output is a drive
-        // level into that amplifier, not a power in dBm, so it gets its
-        // own config key. Folding `power` into the 0..9 range instead
-        // would make every setting from 9 to 23 mean "maximum" while
-        // still looking like a dBm figure.
+        // On a module with its own amplifier the chip output is the
+        // drive into that amplifier rather than the radiated power, so
+        // it gets its own config key and is not confused with `power`.
         clipped = modulePa
-                    ? (int8_t)constrain(cfg.paDrive, 0, MINIF27_MAX_DRIVE)
+                    ? (int8_t)constrain(cfg.paDrive, MINIF27_MIN_DRIVE, MINIF27_MAX_DRIVE)
                     : (int8_t)constrain(power, -9, 22);
 
         if (is1268) {
@@ -560,14 +549,6 @@ const char *TrackerRadio::chipName() {
 int8_t TrackerRadio::appliedPower() { return appliedPwr; }
 
 bool TrackerRadio::hasModulePa() { return modulePa; }
-
-int16_t TrackerRadio::antennaPowerDeciDbm() {
-    if (modulePa) {
-        int8_t d = (int8_t)constrain(appliedPwr, 0, MINIF27_MAX_DRIVE);
-        return MINIF27_OUT_DECIDBM[d];
-    }
-    return (int16_t)appliedPwr * 10;
-}
 
 float TrackerRadio::tcxoVoltage() { return tcxoVolts; }
 

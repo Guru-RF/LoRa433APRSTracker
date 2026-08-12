@@ -33,8 +33,8 @@ loraTcxo=auto
 # Radio module: auto, minif27 (internal PA) or bare
 radioModule=auto
 
-# PA drive 0-9 on module-PA boards (9 = full output, ~28.7 dBm)
-paDrive=9
+# Chip dBm driving the module PA, -9..22 (22 = rated output)
+paDrive=22
 
 # GPS baud: 0 = detect, or pin it (9600 u-blox, 115200 ATGM336H)
 gpsBaud=0
