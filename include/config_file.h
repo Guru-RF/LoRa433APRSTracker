@@ -28,6 +28,21 @@ extern FS FatFS;
 #define DEFAULT_FULL_DEBUG    false
 #define DEFAULT_LORA_FREQ     433.775f
 
+// Radio chip: "auto" identifies SX1276/RFM95 vs SX1262 over SPI at boot.
+// Override with sx1276 / sx1262 to pin it.
+#define DEFAULT_RADIO_CHIP    "auto"
+// SX126x clock source: "auto" asks the module, or give the TCXO supply
+// voltage in volts ("0" for a plain crystal, "1.8", "3.3", ...).
+#define DEFAULT_LORA_TCXO     "auto"
+// Radio module type: "auto" uses the board strap, "minif27" for the
+// G-NiceRF 1262MiniF27 with its internal PA, "bare" for a plain module.
+#define DEFAULT_RADIO_MODULE  "auto"
+// Drive level into a module's internal PA, 0..9. Only used on module-PA
+// boards, where it replaces `power` entirely. 9 is full output.
+#define DEFAULT_PA_DRIVE      9
+// GPS UART baud. 0 = detect (V1 u-blox is 9600, V2 ATGM336H is 115200).
+#define DEFAULT_GPS_BAUD      0
+
 // GPS LED defaults
 #define DEFAULT_GPS_BLINK_INTERVAL  2.0f
 #define DEFAULT_GPS_BLINK_PULSE     0.10f
@@ -76,6 +91,11 @@ struct TrackerConfig {
     int    bme680TempOffset;
     bool   fullDebug;
     float  loraFrequency;
+    char   radioChip[12];
+    char   loraTcxo[8];
+    char   radioModule[12];
+    int    paDrive;
+    long   gpsBaud;
 
     // GPS LED
     float  gpsBlinkInterval;
@@ -114,6 +134,11 @@ static void configSetDefaults(TrackerConfig &cfg) {
     cfg.bme680TempOffset = DEFAULT_BME680_OFFSET;
     cfg.fullDebug = DEFAULT_FULL_DEBUG;
     cfg.loraFrequency = DEFAULT_LORA_FREQ;
+    strncpy(cfg.radioChip, DEFAULT_RADIO_CHIP, sizeof(cfg.radioChip));
+    strncpy(cfg.loraTcxo, DEFAULT_LORA_TCXO, sizeof(cfg.loraTcxo));
+    strncpy(cfg.radioModule, DEFAULT_RADIO_MODULE, sizeof(cfg.radioModule));
+    cfg.paDrive = DEFAULT_PA_DRIVE;
+    cfg.gpsBaud = DEFAULT_GPS_BAUD;
 
     cfg.gpsBlinkInterval = DEFAULT_GPS_BLINK_INTERVAL;
     cfg.gpsBlinkPulse = DEFAULT_GPS_BLINK_PULSE;
@@ -166,7 +191,8 @@ static void configSetValue(TrackerConfig &cfg, const char *key, const char *val)
     } else if (strcasecmp(key, "profile") == 0) {
         strncpy(cfg.profile, val, sizeof(cfg.profile) - 1);
     } else if (strcasecmp(key, "power") == 0) {
-        cfg.power = constrain(atoi(val), 5, 23);
+        cfg.power = constrain(atoi(val), -9, 23);
+        // 18 and 19 are not producible on an SX1276 PA_BOOST; see radio.cpp
     } else if (strcasecmp(key, "hasPa") == 0) {
         cfg.hasPa = (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0);
     } else if (strcasecmp(key, "voltage") == 0) {
@@ -190,6 +216,16 @@ static void configSetValue(TrackerConfig &cfg, const char *key, const char *val)
         cfg.fullDebug = (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0);
     } else if (strcasecmp(key, "loraFrequency") == 0) {
         cfg.loraFrequency = atof(val);
+    } else if (strcasecmp(key, "radioChip") == 0) {
+        strncpy(cfg.radioChip, val, sizeof(cfg.radioChip) - 1);
+    } else if (strcasecmp(key, "loraTcxo") == 0) {
+        strncpy(cfg.loraTcxo, val, sizeof(cfg.loraTcxo) - 1);
+    } else if (strcasecmp(key, "radioModule") == 0) {
+        strncpy(cfg.radioModule, val, sizeof(cfg.radioModule) - 1);
+    } else if (strcasecmp(key, "paDrive") == 0) {
+        cfg.paDrive = constrain(atoi(val), 0, 9);
+    } else if (strcasecmp(key, "gpsBaud") == 0) {
+        cfg.gpsBaud = atol(val);
     } else if (strcasecmp(key, "gpsBlinkInterval") == 0) {
         cfg.gpsBlinkInterval = atof(val);
     } else if (strcasecmp(key, "gpsBlinkPulse") == 0) {
@@ -221,7 +257,7 @@ static const char *CONFIG_TEMPLATE =
     "# APRS comment appended to position reports\n"
     "comment=https://RF.Guru\n"
     "\n"
-    "# TX power (5-23 dBm)\n"
+    "# TX power in dBm (bare modules). Ignored on module-PA boards.\n"
     "power=23\n"
     "\n"
     "# Power amplifier present\n"
@@ -229,6 +265,21 @@ static const char *CONFIG_TEMPLATE =
     "\n"
     "# LoRa frequency (MHz)\n"
     "loraFrequency=433.775\n"
+    "\n"
+    "# Radio chip: auto, sx1276 (RFM95) or sx1262\n"
+    "radioChip=auto\n"
+    "\n"
+    "# SX1262 clock: auto, 0 (crystal), or TCXO volts e.g. 1.8 / 3.3\n"
+    "loraTcxo=auto\n"
+    "\n"
+    "# Radio module: auto, minif27 (internal PA) or bare\n"
+    "radioModule=auto\n"
+    "\n"
+    "# PA drive 0-9 on module-PA boards (9 = full output, ~28.7 dBm)\n"
+    "paDrive=9\n"
+    "\n"
+    "# GPS baud: 0 = detect, or pin it (9600 u-blox, 115200 ATGM336H)\n"
+    "gpsBaud=0\n"
     "\n"
     "# --- Voltage Monitoring ---\n"
     "voltage=true\n"
@@ -262,6 +313,17 @@ static bool configCreateDefault() {
     f.println("power=23");
     f.println("hasPa=true");
     f.println("loraFrequency=433.775");
+    f.println("");
+    f.println("# Radio chip: auto, sx1276 (RFM95) or sx1262");
+    f.println("radioChip=auto");
+    f.println("# SX1262 clock: auto, 0 (crystal), or TCXO volts e.g. 1.8 / 3.3");
+    f.println("loraTcxo=auto");
+    f.println("# Radio module: auto, minif27 (internal PA) or bare");
+    f.println("radioModule=auto");
+    f.println("# PA drive 0-9 on module-PA boards (9 = full output, ~28.7 dBm)");
+    f.println("paDrive=9");
+    f.println("# GPS baud: 0 = detect, or pin it (9600 u-blox, 115200 ATGM336H)");
+    f.println("gpsBaud=0");
     f.println("");
     f.println("voltage=true");
     f.println("triggerVoltage=true");

@@ -11,7 +11,6 @@
 #include <SPI.h>
 #include <SerialPIO.h>
 #include <Wire.h>
-#include <LoRa.h>
 #include <TinyGPSPlus.h>
 #include <Adafruit_BME680.h>
 #include <Adafruit_SHTC3.h>
@@ -21,12 +20,13 @@
 #include "config_file.h"
 #include "aprs.h"
 #include "smartbeacon.h"
+#include "radio.h"
 
 // ============================================================
 // VERSION
 // ============================================================
 
-#define VERSION "RF.Guru_LoRa433APRSTracker 2.0-SB"
+#define VERSION "RF.Guru_LoRa433APRSTracker 2.1-SB"
 
 // ============================================================
 // ANSI Color helpers (matching Python version)
@@ -94,6 +94,9 @@ static unsigned long lastVoltageWarning = 0;
 static unsigned long lastMetadataSend = 0;
 static bool metadataForced = true;
 
+// Board revision, read from the GP15 strap at boot
+static bool boardV2 = false;
+
 // GPS LED state
 static bool gpsLock = false;
 static unsigned long gpsLastBlink = 0;
@@ -154,26 +157,154 @@ static void loraSendText(const char *text) {
     watchdog_update();
     digitalWrite(PIN_LED_LORA, HIGH);
 
-    if (cfg.hasPa) {
+    // On a module with its own amplifier the enable line is not
+    // optional: if GP2 gates that amplifier's supply, transmitting with
+    // it low leaves BUSY asserted through a PA ramp that never
+    // completes, and RadioLib waits on BUSY with no timeout. Assert it
+    // whenever a PA is present, however the config is written.
+    bool needPa = cfg.hasPa || TrackerRadio::hasModulePa();
+
+    if (needPa) {
         digitalWrite(PIN_PA, HIGH);
         delay(250);
         watchdog_update();
     }
 
-    LoRa.beginPacket();
-    LoRa.write(LORA_HEADER, 3);
-    LoRa.write((const uint8_t *)text, strlen(text));
-    LoRa.endPacket();
+    // Both families reject anything over 255 bytes outright, where the
+    // old library silently truncated. Truncate here so an overlong
+    // comment degrades the frame instead of dropping the beacon.
+    const size_t LORA_MAX_PACKET = 255;
+    uint8_t packet[LORA_MAX_PACKET];
+    size_t textLen = strlen(text);
+    if (textLen > LORA_MAX_PACKET - sizeof(LORA_HEADER)) {
+        textLen = LORA_MAX_PACKET - sizeof(LORA_HEADER);
+    }
+    memcpy(packet, LORA_HEADER, sizeof(LORA_HEADER));
+    memcpy(packet + sizeof(LORA_HEADER), text, textLen);
+
+    if (!TrackerRadio::send(packet, sizeof(LORA_HEADER) + textLen)) {
+        red("TX FAILED");
+    }
 
     watchdog_update();
 
-    if (cfg.hasPa) {
+    if (needPa) {
         delay(100);
         digitalWrite(PIN_PA, LOW);
     }
 
     digitalWrite(PIN_LED_LORA, LOW);
     watchdog_update();
+}
+
+// ============================================================
+// GPS bring-up
+//
+// V1 boards carry a u-blox NEO, which speaks UBX and defaults to 9600.
+// V2 boards carry a Zhongke ATGM336H (AT6558) - the part had to change
+// because u-blox modules cannot be imported into the assembly factory -
+// which speaks CASIC/PCAS and defaults to 115200. Sending the wrong
+// family's commands is harmless, but opening the port at the wrong rate
+// means never seeing a single sentence, so the rate is verified rather
+// than assumed.
+//
+// Both emit $GN.. talker IDs once multiple constellations are in use,
+// which TinyGPSPlus parses.
+// ============================================================
+
+// Send an NMEA command, appending the checksum, so the command strings
+// stay readable here.
+static void gpsSendNmea(const char *body) {
+    uint8_t cs = 0;
+    for (const char *p = body; *p; p++) cs ^= (uint8_t)*p;
+    gpsSerial.printf("$%s*%02X\r\n", body, cs);
+}
+
+// Listen for the start of two NMEA sentences.
+static bool gpsSeesNmea(uint32_t windowMs) {
+    uint32_t t0 = millis();
+    int dollars = 0;
+    while ((millis() - t0) < windowMs) {
+        while (gpsSerial.available()) {
+            if (gpsSerial.read() == '$' && ++dollars >= 2) return true;
+        }
+        watchdog_update();
+    }
+    return false;
+}
+
+static bool gpsTryBaud(uint32_t baud, uint32_t windowMs) {
+    gpsSerial.end();
+    delay(20);
+    gpsSerial.begin(baud);
+    delay(20);
+    while (gpsSerial.available()) gpsSerial.read();     // discard partials
+    return gpsSeesNmea(windowMs);
+}
+
+// Returns the baud rate the GPS was found on, or 0 if it stayed silent.
+static uint32_t gpsBringUp(const TrackerConfig &cfg, bool isV2) {
+    uint32_t found = 0;
+
+    if (cfg.gpsBaud > 0) {
+        // Pinned by config: use it whether or not anything answers.
+        gpsSerial.end();
+        delay(20);
+        gpsSerial.begin(cfg.gpsBaud);
+        found = cfg.gpsBaud;
+    } else {
+        // Try the rate this board revision is expected to use first, so
+        // the common case costs one short window.
+        const uint32_t expected = isV2 ? 115200 : 9600;
+        if (gpsTryBaud(expected, 1500)) {
+            found = expected;
+        } else {
+            static const uint32_t others[] = { 9600, 115200, 38400, 57600, 19200 };
+            for (size_t i = 0; i < sizeof(others) / sizeof(others[0]); i++) {
+                if (others[i] == expected) continue;
+                if (gpsTryBaud(others[i], 1200)) { found = others[i]; break; }
+            }
+        }
+        if (!found) {
+            gpsSerial.end();
+            delay(20);
+            gpsSerial.begin(expected);
+        }
+    }
+
+    watchdog_update();
+
+    if (isV2) {
+        // CASIC/PCAS: 1 Hz, and GGA + RMC only. Trimming the sentence
+        // set matters - the default burst can outrun the 256-byte PIO
+        // FIFO while a beacon is on the air for several seconds.
+        gpsSendNmea("PCAS02,1000");
+        delay(100);
+        gpsSendNmea("PCAS03,1,0,0,0,1,0,0,0");
+        delay(100);
+    } else {
+        // UBX-CFG-RATE: 1 Hz
+        const uint8_t gps1hz[] = {
+            0xB5, 0x62, 0x06, 0x08, 0x06, 0x00,
+            0xE8, 0x03, 0x01, 0x00, 0x01, 0x00,
+            0x01, 0x39
+        };
+        gpsSerial.write(gps1hz, sizeof(gps1hz));
+        delay(100);
+
+        // UBX-CFG-MSG: silence the binary messages
+        const uint8_t disableUbx[] = {
+            0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0x01, 0x02,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x12, 0xB9,
+            0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0x01, 0x03,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x13, 0xC0
+        };
+        gpsSerial.write(disableUbx, sizeof(disableUbx));
+        delay(100);
+    }
+
+    watchdog_update();
+    return found;
 }
 
 // ============================================================
@@ -310,6 +441,9 @@ void setup() {
     pinMode(PIN_I2C_PWR, OUTPUT);
     digitalWrite(PIN_I2C_PWR, LOW);
 
+    // Board revision strap (grounded on V2, floating on V1)
+    boardV2 = TrackerRadio::boardIsV2();
+
     // GPS reset (hold low 1s, then high 1s - same as Python boot.py)
     pinMode(PIN_GPS_RST, OUTPUT);
     digitalWrite(PIN_GPS_RST, LOW);
@@ -363,6 +497,16 @@ void setup() {
     FatFSUSB.onUnplug([](uint32_t) { rp2040.reboot(); });
     FatFSUSB.driveReady(usbDriveReady);
     FatFSUSB.begin();
+
+    // Starting the mass-storage interface re-enumerates the USB device,
+    // which drops the host's serial connection for about a second.
+    // Everything printed in that window is lost - which used to include
+    // the entire radio detection report. Wait for the host to come back
+    // before continuing. Bounded, because on a charger there is no host.
+    unsigned long usbWait = millis();
+    while (!Serial && (millis() - usbWait) < 2500) delay(10);
+    delay(250);
+
     green("USB mass storage active");
 
     // Print config summary
@@ -385,52 +529,79 @@ void setup() {
     snprintf(cfgMsg, sizeof(cfgMsg), "Sequence start at: %d", sequence);
     yellow(cfgMsg);
 
-    // LoRa init
+    // LoRa init - the radio layer identifies the fitted chip itself
     yellow("Init LoRa");
-    SPI.setRX(PIN_SPI_MISO);
-    SPI.setTX(PIN_SPI_MOSI);
-    SPI.setSCK(PIN_SPI_CLK);
 
-    LoRa.setPins(PIN_LORA_CS, PIN_LORA_RST, -1);
-    LoRa.setSPI(SPI);
-
-    if (!LoRa.begin((long)(cfg.loraFrequency * 1E6))) {
+    char radioErr[96] = "";
+    if (!TrackerRadio::begin(cfg, radioErr, sizeof(radioErr))) {
+        red(radioErr);
         red("LoRa INIT ERROR");
         while (true) { delay(1000); }
     }
-    LoRa.setTxPower(cfg.power);
-    LoRa.enableCrc();
-    LoRa.setSpreadingFactor(12);
-    LoRa.setSignalBandwidth(125000);
-    LoRa.setSyncWord(0x12);
 
-    snprintf(cfgMsg, sizeof(cfgMsg), "LoRa OK (freq = %.3f MHz, pwr = %d dBm)", cfg.loraFrequency, cfg.power);
+    snprintf(cfgMsg, sizeof(cfgMsg), "Board: %s (GP15 strap %s)",
+             boardV2 ? "V2" : "V1", boardV2 ? "grounded" : "open");
+    yellow(cfgMsg);
+
+    snprintf(cfgMsg, sizeof(cfgMsg), "Radio detected: %s", TrackerRadio::chipName());
     green(cfgMsg);
+
+    // The SPI probe is authoritative; disagreement means the strap is
+    // wrong or the wrong module was fitted, which is worth knowing.
+    if (boardV2 != (TrackerRadio::chip() == RADIO_CHIP_SX126X)) {
+        yellow("WARNING: board strap and detected radio disagree");
+    }
+    if (TrackerRadio::chip() == RADIO_CHIP_SX126X) {
+        float v = TrackerRadio::tcxoVoltage();
+        if (v > 0.0f) snprintf(cfgMsg, sizeof(cfgMsg), "> clock: TCXO on DIO3 @ %.1fV", v);
+        else          snprintf(cfgMsg, sizeof(cfgMsg), "> clock: crystal");
+        yellow(cfgMsg);
+    }
+
+    int16_t antDeci = TrackerRadio::antennaPowerDeciDbm();
+    if (TrackerRadio::hasModulePa()) {
+        snprintf(cfgMsg, sizeof(cfgMsg),
+                 "LoRa OK (%.3f MHz, PA drive %d -> %d.%d dBm out, SF12/BW125/CR4:5)",
+                 cfg.loraFrequency, TrackerRadio::appliedPower(),
+                 antDeci / 10, abs(antDeci % 10));
+    } else {
+        snprintf(cfgMsg, sizeof(cfgMsg),
+                 "LoRa OK (%.3f MHz, pwr = %d dBm, SF12/BW125/CR4:5)",
+                 cfg.loraFrequency, TrackerRadio::appliedPower());
+    }
+    green(cfgMsg);
+
+    if (TrackerRadio::hasModulePa()) {
+        // `power` is a dBm figure and means nothing to an amplifier
+        // driven by a 0-9 index, so paDrive owns the output here. Say so
+        // rather than letting a stale power= line look effective.
+        snprintf(cfgMsg, sizeof(cfgMsg),
+                 "> paDrive=%d sets the output; power=%d is unused on this module",
+                 TrackerRadio::appliedPower(), cfg.power);
+        yellow(cfgMsg);
+    } else if (TrackerRadio::appliedPower() != cfg.power) {
+        snprintf(cfgMsg, sizeof(cfgMsg),
+                 "> power clamped from %d to %d dBm for this chip",
+                 cfg.power, TrackerRadio::appliedPower());
+        yellow(cfgMsg);
+    }
+    if (cfg.fullDebug) {
+        char radioInfo[160];
+        TrackerRadio::describe(radioInfo, sizeof(radioInfo));
+        yellow(radioInfo);
+    }
 
     // GPS init
     yellow("Init GPS");
-    gpsSerial.begin(9600);
 
-    // Set GPS to 1Hz
-    const uint8_t gps1hz[] = {
-        0xB5, 0x62, 0x06, 0x08, 0x06, 0x00,
-        0xE8, 0x03, 0x01, 0x00, 0x01, 0x00,
-        0x01, 0x39
-    };
-    gpsSerial.write(gps1hz, sizeof(gps1hz));
-    delay(100);
-
-    // Disable UBX messages
-    const uint8_t disableUbx[] = {
-        0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0x01, 0x02,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x12, 0xB9,
-        0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0x01, 0x03,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x13, 0xC0
-    };
-    gpsSerial.write(disableUbx, sizeof(disableUbx));
-    delay(100);
-
-    green("GPS OK");
+    uint32_t baud = gpsBringUp(cfg, boardV2);
+    if (baud) {
+        snprintf(cfgMsg, sizeof(cfgMsg), "GPS OK (%s at %lu baud)",
+                 boardV2 ? "ATGM336H" : "u-blox", (unsigned long)baud);
+        green(cfgMsg);
+    } else {
+        yellow("GPS silent at every baud rate tried - continuing without");
+    }
 
     // I2C sensors
     if (cfg.i2cEnabled) {

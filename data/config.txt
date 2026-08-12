@@ -15,7 +15,7 @@ symbol=L>
 # APRS comment appended to position reports
 comment=https://RF.Guru
 
-# TX power (5-23 dBm)
+# TX power in dBm (bare modules). Ignored on module-PA boards.
 power=23
 
 # Power amplifier present
@@ -23,6 +23,21 @@ hasPa=true
 
 # LoRa frequency (MHz)
 loraFrequency=433.775
+
+# Radio chip: auto, sx1276 (RFM95) or sx1262
+radioChip=auto
+
+# SX1262 clock: auto, 0 (crystal), or TCXO volts e.g. 1.8 / 3.3
+loraTcxo=auto
+
+# Radio module: auto, minif27 (internal PA) or bare
+radioModule=auto
+
+# PA drive 0-9 on module-PA boards (9 = full output, ~28.7 dBm)
+paDrive=9
+
+# GPS baud: 0 = detect, or pin it (9600 u-blox, 115200 ATGM336H)
+gpsBaud=0
 
 # --- Voltage Monitoring ---
 voltage=true

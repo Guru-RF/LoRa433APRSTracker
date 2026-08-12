@@ -10,7 +10,11 @@
 #define PIN_LED_GPS     10
 #define PIN_LED_LORA    11
 
-// Power Amplifier
+// Power amplifier enable.
+// V1: the external 13.8 V amplifier. V2: no external amplifier exists -
+// the MiniF27's own PA feeds a low-pass filter and the SMA directly -
+// but the line still has to be asserted around a transmission, so the
+// radio layer treats "a PA is present" as reason enough to drive it.
 #define PIN_PA          2
 
 // I2C Sensor Power
@@ -32,6 +36,23 @@
 #define PIN_LORA_CS     21
 #define PIN_LORA_RST    20
 
+// SX126x BUSY handshake line.
+// V1 boards (RFM95/SX1276) do not use it; V2 boards (SX1262) wire it to
+// GP22. Verified on hardware with tools/chipprobe.
+#define PIN_LORA_BUSY   22
+
+// Radio interrupt line: DIO0 on SX127x, DIO1 on SX126x.
+// Neither board revision routes it to the RP2040, so the driver polls the
+// chip's IRQ status register instead. Set to a GPIO if a future revision
+// wires it up.
+#define PIN_LORA_DIO    -1
+
 // ADC Voltage
 #define PIN_ADC_PA      27   // with PA
 #define PIN_ADC_NOPA    26   // without PA
+
+// Board revision strap. V2 boards (SX1262) tie this to ground; on V1
+// boards (RFM95) the pin is unconnected and reads high through the
+// internal pull-up. Advisory only - the radio itself is identified over
+// SPI - but a mismatch between the two is worth flagging.
+#define PIN_BOARD_ID    15
