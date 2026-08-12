@@ -86,6 +86,7 @@ static int8_t         appliedPwr = 0;
 static float          tcxoVolts  = 0.0f;
 static bool           spiStarted = false;
 static bool           modulePa   = false;   // module has its own amplifier
+static bool           useLdoReg  = false;   // die regulator: LDO vs DC-DC
 
 // The 16-byte version string at register 0x0320 is the only way to tell
 // the SX126x variants apart, and it matters: RadioLib's SX1262 class
@@ -437,16 +438,22 @@ bool TrackerRadio::begin(const TrackerConfig &cfg, char *err, size_t errLen) {
                     ? (int8_t)constrain(cfg.paDrive, MINIF27_MIN_DRIVE, MINIF27_MAX_DRIVE)
                     : (int8_t)constrain(power, -9, 22);
 
+        // DC-DC halves the die's supply current but needs an inductor
+        // on the module's DCC_SW pin. Where there is none, the die's PA
+        // is starved and the module's amplifier faithfully amplifies a
+        // weak drive - so this is configurable rather than assumed.
+        useLdoReg = (strcasecmp(cfg.loraRegulator, "ldo") == 0);
+
         if (is1268) {
             state = radioSx1268.begin(cfg.loraFrequency, LORA_BW_KHZ, LORA_SF,
                                       LORA_CR, LORA_SYNC_WORD, clipped,
-                                      LORA_PREAMBLE, tcxoVolts, false);
+                                      LORA_PREAMBLE, tcxoVolts, useLdoReg);
             sx126 = &radioSx1268;
             phy   = &radioSx1268;
         } else {
             state = radioSx1262.begin(cfg.loraFrequency, LORA_BW_KHZ, LORA_SF,
                                       LORA_CR, LORA_SYNC_WORD, clipped,
-                                      LORA_PREAMBLE, tcxoVolts, false);
+                                      LORA_PREAMBLE, tcxoVolts, useLdoReg);
             sx126 = &radioSx1262;
             phy   = &radioSx1262;
         }
@@ -474,7 +481,7 @@ bool TrackerRadio::begin(const TrackerConfig &cfg, char *err, size_t errLen) {
         //
         // Last, because setOutputPower() saves and restores whatever OCP
         // was in force when it ran.
-        sx126->setCurrentLimit(LORA_OCP_SX126X_MA);
+        sx126->setCurrentLimit((float)cfg.loraOcp);
 
         txDoneMask = RADIOLIB_SX126X_IRQ_TX_DONE;
     }
@@ -551,6 +558,8 @@ int8_t TrackerRadio::appliedPower() { return appliedPwr; }
 bool TrackerRadio::hasModulePa() { return modulePa; }
 
 float TrackerRadio::tcxoVoltage() { return tcxoVolts; }
+
+bool TrackerRadio::usingLdoRegulator() { return useLdoReg; }
 
 uint32_t TrackerRadio::timeOnAirMs(size_t len) {
     if (!phy) return 0;

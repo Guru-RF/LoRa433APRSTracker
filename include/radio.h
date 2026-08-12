@@ -60,6 +60,10 @@ int8_t appliedPower();
 // crystal module.
 float tcxoVoltage();
 
+// True when the SX126x die runs its internal LDO rather than the DC-DC,
+// which is what a module without a DCC_SW inductor needs.
+bool usingLdoRegulator();
+
 // Expected time on air for a payload of `len` bytes, in milliseconds.
 uint32_t timeOnAirMs(size_t len);
 

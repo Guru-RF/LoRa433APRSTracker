@@ -556,6 +556,9 @@ void setup() {
         if (v > 0.0f) snprintf(cfgMsg, sizeof(cfgMsg), "> clock: TCXO on DIO3 @ %.1fV", v);
         else          snprintf(cfgMsg, sizeof(cfgMsg), "> clock: crystal");
         yellow(cfgMsg);
+        snprintf(cfgMsg, sizeof(cfgMsg), "> die regulator: %s, PA current limit %d mA",
+                 TrackerRadio::usingLdoRegulator() ? "LDO" : "DC-DC", cfg.loraOcp);
+        yellow(cfgMsg);
     }
 
     if (TrackerRadio::hasModulePa()) {

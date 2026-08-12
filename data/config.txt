@@ -39,6 +39,12 @@ paDrive=22
 # GPS baud: 0 = detect, or pin it (9600 u-blox, 115200 ATGM336H)
 gpsBaud=0
 
+# SX1262 internal regulator: dcdc or ldo
+loraRegulator=dcdc
+
+# SX1262 PA current limit in mA, max 157
+loraOcp=140
+
 # --- Voltage Monitoring ---
 voltage=true
 triggerVoltage=true

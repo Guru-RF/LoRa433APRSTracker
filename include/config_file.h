@@ -43,6 +43,13 @@ extern FS FatFS;
 #define DEFAULT_PA_DRIVE      22
 // GPS UART baud. 0 = detect (V1 u-blox is 9600, V2 ATGM336H is 115200).
 #define DEFAULT_GPS_BAUD      0
+// SX1262 internal regulator: "dcdc" needs an inductor on the module's
+// DCC_SW pin and halves the die's supply current; "ldo" always works.
+// If the module has no inductor, dcdc starves the die's PA.
+#define DEFAULT_LORA_REG      "dcdc"
+// SX1262 PA over-current limit in mA, 0..157. Semtech's SX1262 default
+// is 140; the die draws ~118 mA at +22 dBm, so there is little margin.
+#define DEFAULT_LORA_OCP      140
 
 // GPS LED defaults
 #define DEFAULT_GPS_BLINK_INTERVAL  2.0f
@@ -97,6 +104,8 @@ struct TrackerConfig {
     char   radioModule[12];
     int    paDrive;
     long   gpsBaud;
+    char   loraRegulator[8];
+    int    loraOcp;
 
     // GPS LED
     float  gpsBlinkInterval;
@@ -140,6 +149,8 @@ static void configSetDefaults(TrackerConfig &cfg) {
     strncpy(cfg.radioModule, DEFAULT_RADIO_MODULE, sizeof(cfg.radioModule));
     cfg.paDrive = DEFAULT_PA_DRIVE;
     cfg.gpsBaud = DEFAULT_GPS_BAUD;
+    strncpy(cfg.loraRegulator, DEFAULT_LORA_REG, sizeof(cfg.loraRegulator));
+    cfg.loraOcp = DEFAULT_LORA_OCP;
 
     cfg.gpsBlinkInterval = DEFAULT_GPS_BLINK_INTERVAL;
     cfg.gpsBlinkPulse = DEFAULT_GPS_BLINK_PULSE;
@@ -227,6 +238,10 @@ static void configSetValue(TrackerConfig &cfg, const char *key, const char *val)
         cfg.paDrive = constrain(atoi(val), -9, 22);
     } else if (strcasecmp(key, "gpsBaud") == 0) {
         cfg.gpsBaud = atol(val);
+    } else if (strcasecmp(key, "loraRegulator") == 0) {
+        strncpy(cfg.loraRegulator, val, sizeof(cfg.loraRegulator) - 1);
+    } else if (strcasecmp(key, "loraOcp") == 0) {
+        cfg.loraOcp = constrain(atoi(val), 0, 157);
     } else if (strcasecmp(key, "gpsBlinkInterval") == 0) {
         cfg.gpsBlinkInterval = atof(val);
     } else if (strcasecmp(key, "gpsBlinkPulse") == 0) {
@@ -282,6 +297,11 @@ static const char *CONFIG_TEMPLATE =
     "# GPS baud: 0 = detect, or pin it (9600 u-blox, 115200 ATGM336H)\n"
     "gpsBaud=0\n"
     "\n"
+    "# SX1262 internal regulator: dcdc or ldo\n"
+    "loraRegulator=dcdc\n"
+    "# SX1262 PA current limit in mA, max 157\n"
+    "loraOcp=140\n"
+    "\n"
     "# --- Voltage Monitoring ---\n"
     "voltage=true\n"
     "triggerVoltage=true\n"
@@ -325,6 +345,10 @@ static bool configCreateDefault() {
     f.println("paDrive=22");
     f.println("# GPS baud: 0 = detect, or pin it (9600 u-blox, 115200 ATGM336H)");
     f.println("gpsBaud=0");
+    f.println("# SX1262 internal regulator: dcdc or ldo");
+    f.println("loraRegulator=dcdc");
+    f.println("# SX1262 PA current limit in mA, max 157");
+    f.println("loraOcp=140");
     f.println("");
     f.println("voltage=true");
     f.println("triggerVoltage=true");
