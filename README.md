@@ -84,16 +84,12 @@ rising to 29.8 dBm at 5.0 V) and on the filtering after the module, so
 the firmware reports what it programmed rather than predicting power it
 cannot measure.
 
-Two hardware notes for anyone chasing output power on a V2 board:
-
-- The series diode feeding VCC_PA costs whatever it drops. A PN part
-  such as a 1N4007F takes ~0.8 V at these currents; the SS34F the
-  schematic specifies takes ~0.3 V, worth roughly 1 dB.
-- The ESD part on the antenna port must clear the RF swing. 800 mW into
-  50 ohm is 8.9 V peak, so a 5 V TVS clamps the transmitter and caps
-  output regardless of drive. Use a part that stays out of the way — a
-  polymer suppressor such as the Littelfuse PGB1010402KR is 0.04 pF and
-  does not conduct until hundreds of volts.
+Two V2 part choices matter to output power, and both are load-bearing
+rather than incidental. The series diode feeding VCC_PA must be a
+Schottky — a PN part costs ~0.5 V more at these currents, about 1 dB.
+The antenna-port ESD device must stay out of the way of the RF swing:
+800 mW into 50 ohm is 8.9 V peak, so a 5 V TVS clamps the transmitter
+and caps output regardless of drive.
 
 ## Firmware Update
 
