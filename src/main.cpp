@@ -203,10 +203,14 @@ static void loraSendText(const char *text) {
 // V1 boards carry a u-blox NEO, which speaks UBX and defaults to 9600.
 // V2 boards carry a Zhongke ATGM336H (AT6558) - the part had to change
 // because u-blox modules cannot be imported into the assembly factory -
-// which speaks CASIC/PCAS and defaults to 115200. Sending the wrong
-// family's commands is harmless, but opening the port at the wrong rate
-// means never seeing a single sentence, so the rate is verified rather
-// than assumed.
+// which speaks CASIC/PCAS and defaults to 115200.
+//
+// Nothing here tries to work out which one is fitted. The baud rate is
+// found by listening, and both command sets are sent unconditionally:
+// UBX reaching an ATGM336H is binary noise it discards, and a PCAS
+// sentence reaching a u-blox is an unrecognised NMEA line it ignores.
+// That is cheaper and more reliable than any board-revision guess - the
+// GP15 strap reads low on V1 hardware too, so it identifies nothing.
 //
 // Both emit $GN.. talker IDs once multiple constellations are in use,
 // which TinyGPSPlus parses.
@@ -243,7 +247,7 @@ static bool gpsTryBaud(uint32_t baud, uint32_t windowMs) {
 }
 
 // Returns the baud rate the GPS was found on, or 0 if it stayed silent.
-static uint32_t gpsBringUp(const TrackerConfig &cfg, bool isV2) {
+static uint32_t gpsBringUp(const TrackerConfig &cfg) {
     uint32_t found = 0;
 
     if (cfg.gpsBaud > 0) {
@@ -253,55 +257,55 @@ static uint32_t gpsBringUp(const TrackerConfig &cfg, bool isV2) {
         gpsSerial.begin(cfg.gpsBaud);
         found = cfg.gpsBaud;
     } else {
-        // Try the rate this board revision is expected to use first, so
-        // the common case costs one short window.
-        const uint32_t expected = isV2 ? 115200 : 9600;
-        if (gpsTryBaud(expected, 1500)) {
-            found = expected;
-        } else {
-            static const uint32_t others[] = { 9600, 115200, 38400, 57600, 19200 };
-            for (size_t i = 0; i < sizeof(others) / sizeof(others[0]); i++) {
-                if (others[i] == expected) continue;
-                if (gpsTryBaud(others[i], 1200)) { found = others[i]; break; }
-            }
+        // Try the rate this board most likely ships with first, so the
+        // common case costs one short window. The radio is the honest
+        // discriminator here - it was read off the chip a moment ago,
+        // whereas the GP15 strap reads low on both revisions. A board
+        // that pairs them differently still comes up via the sweep.
+        const uint32_t likely =
+            (TrackerRadio::chip() == RADIO_CHIP_SX126X) ? 115200 : 9600;
+        static const uint32_t rates[] = { 0, 9600, 115200, 38400, 57600, 19200 };
+        for (size_t i = 0; i < sizeof(rates) / sizeof(rates[0]); i++) {
+            uint32_t baud = (i == 0) ? likely : rates[i];
+            if (i > 0 && baud == likely) continue;      // already tried
+            if (gpsTryBaud(baud, 1500)) { found = baud; break; }
         }
         if (!found) {
             gpsSerial.end();
             delay(20);
-            gpsSerial.begin(expected);
+            gpsSerial.begin(9600);
         }
     }
 
     watchdog_update();
 
-    if (isV2) {
-        // CASIC/PCAS: 1 Hz, and GGA + RMC only. Trimming the sentence
-        // set matters - the default burst can outrun the 256-byte PIO
-        // FIFO while a beacon is on the air for several seconds.
-        gpsSendNmea("PCAS02,1000");
-        delay(100);
-        gpsSendNmea("PCAS03,1,0,0,0,1,0,0,0");
-        delay(100);
-    } else {
-        // UBX-CFG-RATE: 1 Hz
-        const uint8_t gps1hz[] = {
-            0xB5, 0x62, 0x06, 0x08, 0x06, 0x00,
-            0xE8, 0x03, 0x01, 0x00, 0x01, 0x00,
-            0x01, 0x39
-        };
-        gpsSerial.write(gps1hz, sizeof(gps1hz));
-        delay(100);
+    // UBX-CFG-RATE: 1 Hz (u-blox)
+    const uint8_t gps1hz[] = {
+        0xB5, 0x62, 0x06, 0x08, 0x06, 0x00,
+        0xE8, 0x03, 0x01, 0x00, 0x01, 0x00,
+        0x01, 0x39
+    };
+    gpsSerial.write(gps1hz, sizeof(gps1hz));
+    delay(100);
 
-        // UBX-CFG-MSG: silence the binary messages
-        const uint8_t disableUbx[] = {
-            0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0x01, 0x02,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x12, 0xB9,
-            0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0x01, 0x03,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x13, 0xC0
-        };
-        gpsSerial.write(disableUbx, sizeof(disableUbx));
-        delay(100);
-    }
+    // UBX-CFG-MSG: silence the binary messages (u-blox)
+    const uint8_t disableUbx[] = {
+        0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0x01, 0x02,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x12, 0xB9,
+        0xB5, 0x62, 0x06, 0x01, 0x08, 0x00, 0x01, 0x03,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x13, 0xC0
+    };
+    gpsSerial.write(disableUbx, sizeof(disableUbx));
+    delay(100);
+    watchdog_update();
+
+    // CASIC/PCAS: 1 Hz, and GGA + RMC only (ATGM336H). Trimming the
+    // sentence set matters - the default burst can outrun the 256-byte
+    // PIO FIFO while a beacon is on the air for several seconds.
+    gpsSendNmea("PCAS02,1000");
+    delay(100);
+    gpsSendNmea("PCAS03,1,0,0,0,1,0,0,0");
+    delay(100);
 
     watchdog_update();
     return found;
@@ -539,18 +543,18 @@ void setup() {
         while (true) { delay(1000); }
     }
 
-    snprintf(cfgMsg, sizeof(cfgMsg), "Board: %s (GP15 strap %s)",
-             boardV2 ? "V2" : "V1", boardV2 ? "grounded" : "open");
+    // The fitted radio is what the board revision actually means, and
+    // it is read from the chip rather than inferred. The GP15 strap is
+    // reported alongside it purely as an observation: it reads low on
+    // V1 hardware as well, so it does not identify a revision on its
+    // own and nothing functional depends on it.
+    snprintf(cfgMsg, sizeof(cfgMsg), "Board: %s  (GP15 strap %s)",
+             TrackerRadio::chip() == RADIO_CHIP_SX126X ? "V2" : "V1",
+             boardV2 ? "low" : "open");
     yellow(cfgMsg);
 
     snprintf(cfgMsg, sizeof(cfgMsg), "Radio detected: %s", TrackerRadio::chipName());
     green(cfgMsg);
-
-    // The SPI probe is authoritative; disagreement means the strap is
-    // wrong or the wrong module was fitted, which is worth knowing.
-    if (boardV2 != (TrackerRadio::chip() == RADIO_CHIP_SX126X)) {
-        yellow("WARNING: board strap and detected radio disagree");
-    }
     if (TrackerRadio::chip() == RADIO_CHIP_SX126X) {
         float v = TrackerRadio::tcxoVoltage();
         if (v > 0.0f) snprintf(cfgMsg, sizeof(cfgMsg), "> clock: TCXO on DIO3 @ %.1fV", v);
@@ -594,10 +598,9 @@ void setup() {
     // GPS init
     yellow("Init GPS");
 
-    uint32_t baud = gpsBringUp(cfg, boardV2);
+    uint32_t baud = gpsBringUp(cfg);
     if (baud) {
-        snprintf(cfgMsg, sizeof(cfgMsg), "GPS OK (%s at %lu baud)",
-                 boardV2 ? "ATGM336H" : "u-blox", (unsigned long)baud);
+        snprintf(cfgMsg, sizeof(cfgMsg), "GPS OK (%lu baud)", (unsigned long)baud);
         green(cfgMsg);
     } else {
         yellow("GPS silent at every baud rate tried - continuing without");

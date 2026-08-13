@@ -12,12 +12,16 @@ identified over SPI and the matching driver is configured:
 | V1    | HopeRF RFM95W / Semtech SX1276 | u-blox NEO, UBX, 9600  |
 | V2    | G-NiceRF 1262MiniF27 (SX1262)  | ATGM336H, PCAS, 115200 |
 
-V2 boards are identified by the GP15 strap, which is tied to ground. The
-V2 radio adds a BUSY line on GP22 and an internal PA reaching 29 dBm.
+The revision is identified from the radio itself, read over SPI. The
+GP15 strap is not used for it - measurement showed it reads low on V1
+hardware as well, so it identifies nothing. The V2 radio adds a BUSY
+line on GP22 and an internal PA reaching 29 dBm.
 
-The GPS baud rate is verified at boot rather than assumed, so a board
-that disagrees with its strap still comes up; `gpsBaud` pins it if
-needed. Both receivers emit `$GN` talker IDs, which TinyGPSPlus parses.
+The GPS is brought up without needing to know the revision either: the
+baud rate is found by listening, and both the u-blox (UBX) and ATGM336H
+(PCAS) command sets are sent, since each is ignored by the other module.
+`gpsBaud` pins the rate if a board ever needs it. Both receivers emit
+`$GN` talker IDs, which TinyGPSPlus parses.
 
 Both are configured for SF12, 125 kHz, coding rate 4/5, 8-symbol
 preamble, explicit header, CRC on and sync word `0x12`, so the two
