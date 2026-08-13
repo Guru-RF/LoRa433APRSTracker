@@ -89,20 +89,20 @@ void loop() {
     if (!transmitted) {
         transmitted = true;
 
-        // Sweep the amplifier from gentle to full so one run shows both
-        // that the path works and whether the supply sags at the top of
-        // the range - the module pulls 460 mA at drive level 9.
-        static const int8_t LEVELS[] = { 0, 4, 9 };
+        // Sweep the die from gentle to full so one run shows both that
+        // the path works and whether the supply holds at the top of the
+        // range. These are chip output powers in dBm; on a module with
+        // an internal amplifier they are the drive into it.
+        static const int8_t LEVELS[] = { 0, 10, 22 };
 
         for (size_t i = 0; i < sizeof(LEVELS) / sizeof(LEVELS[0]); i++) {
-            cfg.power = LEVELS[i];
+            cfg.power   = LEVELS[i];
+            cfg.paDrive = LEVELS[i];
             char err2[96] = "";
             if (!TrackerRadio::begin(cfg, err2, sizeof(err2))) {
                 Serial.printf("\x1b[1;31m  re-begin failed: %s\x1b[0m\r\n", err2);
                 break;
             }
-
-            int16_t deci = TrackerRadio::antennaPowerDeciDbm();
 
             // Same framing as the tracker: 3-byte LoRa-APRS header, then
             // the ASCII frame.
@@ -118,9 +118,10 @@ void loop() {
             size_t total = sizeof(header) + frameLen;
 
             line("");
-            line("TX %u/3: drive %d -> %d.%d dBm at the antenna, %u bytes, ~%lu ms",
+            line("TX %u/3: chip %d dBm%s, %u bytes, ~%lu ms",
                  (unsigned)(i + 1), TrackerRadio::appliedPower(),
-                 deci / 10, abs(deci % 10), (unsigned)total,
+                 TrackerRadio::hasModulePa() ? " into module PA" : "",
+                 (unsigned)total,
                  (unsigned long)TrackerRadio::timeOnAirMs(total));
 
             // Mirror the tracker's amplifier sequencing exactly. This is

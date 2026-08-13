@@ -55,8 +55,6 @@ void setup() {
     pinMode(PIN_LED_PWR, OUTPUT);   digitalWrite(PIN_LED_PWR, HIGH);
     pinMode(PIN_LORA_CS, OUTPUT);   digitalWrite(PIN_LORA_CS, HIGH);
 
-    pinMode(PIN_BOARD_ID, INPUT_PULLUP);
-
     // Same reset the tracker does: hold low 1 s, release, wait 1 s.
     pinMode(PIN_GPS_RST, OUTPUT);
     digitalWrite(PIN_GPS_RST, LOW);
@@ -67,9 +65,7 @@ void setup() {
     Serial.begin(115200);
     delay(3000);
 
-    Serial.printf("\r\n=== GPS survey ===\r\nboard: %s (GP15 %s)\r\n",
-                  digitalRead(PIN_BOARD_ID) == LOW ? "V2" : "V1",
-                  digitalRead(PIN_BOARD_ID) == LOW ? "grounded" : "open");
+    Serial.print("\r\n=== GPS survey ===\r\n");
 
     // The module's TX line idles high whether or not it is talking, so
     // silence at 9600 could equally be a different baud rate. Sweep the

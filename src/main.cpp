@@ -94,9 +94,6 @@ static unsigned long lastVoltageWarning = 0;
 static unsigned long lastMetadataSend = 0;
 static bool metadataForced = true;
 
-// Board revision, read from the GP15 strap at boot
-static bool boardV2 = false;
-
 // GPS LED state
 static bool gpsLock = false;
 static unsigned long gpsLastBlink = 0;
@@ -445,9 +442,6 @@ void setup() {
     pinMode(PIN_I2C_PWR, OUTPUT);
     digitalWrite(PIN_I2C_PWR, LOW);
 
-    // Board revision strap (grounded on V2, floating on V1)
-    boardV2 = TrackerRadio::boardIsV2();
-
     // GPS reset (hold low 1s, then high 1s - same as Python boot.py)
     pinMode(PIN_GPS_RST, OUTPUT);
     digitalWrite(PIN_GPS_RST, LOW);
@@ -543,14 +537,10 @@ void setup() {
         while (true) { delay(1000); }
     }
 
-    // The fitted radio is what the board revision actually means, and
-    // it is read from the chip rather than inferred. The GP15 strap is
-    // reported alongside it purely as an observation: it reads low on
-    // V1 hardware as well, so it does not identify a revision on its
-    // own and nothing functional depends on it.
-    snprintf(cfgMsg, sizeof(cfgMsg), "Board: %s  (GP15 strap %s)",
-             TrackerRadio::chip() == RADIO_CHIP_SX126X ? "V2" : "V1",
-             boardV2 ? "low" : "open");
+    // The fitted radio is what the board revision means, and it is read
+    // off the chip rather than inferred from any strap.
+    snprintf(cfgMsg, sizeof(cfgMsg), "Board: %s",
+             TrackerRadio::chip() == RADIO_CHIP_SX126X ? "V2" : "V1");
     yellow(cfgMsg);
 
     snprintf(cfgMsg, sizeof(cfgMsg), "Radio detected: %s", TrackerRadio::chipName());

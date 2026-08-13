@@ -41,10 +41,6 @@ bool send(const uint8_t *data, size_t len);
 RadioChip   chip();
 const char *chipName();
 
-// V2 boards ground the GP15 strap. Advisory - the radio itself is
-// identified over SPI - but it tells us the module carries its own PA.
-bool boardIsV2();
-
 // True when the fitted module has an internal power amplifier, so the
 // chip's own output is a *drive level* rather than the radiated power.
 bool hasModulePa();

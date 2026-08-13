@@ -51,8 +51,10 @@
 #define PIN_ADC_PA      27   // with PA
 #define PIN_ADC_NOPA    26   // without PA
 
-// Board revision strap. V2 boards (SX1262) tie this to ground; on V1
-// boards (RFM95) the pin is unconnected and reads high through the
-// internal pull-up. Advisory only - the radio itself is identified over
-// SPI - but a mismatch between the two is worth flagging.
-#define PIN_BOARD_ID    15
+// GP15 is held low on the board. It was believed to be a V2 revision
+// strap, but it measures low on V1 hardware too, so it identifies
+// nothing and the firmware does not read it - the board revision comes
+// from the radio, over SPI. Left documented so nobody wires it into a
+// decision again, and so nobody drives it as an output without first
+// finding out what it is connected to.
+// #define PIN_BOARD_ID    15

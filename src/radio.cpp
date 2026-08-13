@@ -102,12 +102,6 @@ static char sx126xVersion[8] = "";
 // Emits no RF.
 // ============================================================
 
-bool TrackerRadio::boardIsV2() {
-    pinMode(PIN_BOARD_ID, INPUT_PULLUP);
-    delayMicroseconds(50);
-    return digitalRead(PIN_BOARD_ID) == LOW;
-}
-
 static void rawBegin() {
     if (spiStarted) return;
     pinMode(PIN_LORA_CS, OUTPUT);
@@ -334,16 +328,21 @@ static RadioChip resolveChip(const TrackerConfig &cfg) {
     return TrackerRadio::probe();
 }
 
-// Does the fitted module carry its own amplifier? "auto" trusts the
-// board strap: V2 boards are the ones built around the 1262MiniF27.
+// Does the fitted module carry its own amplifier?
+//
+// The radio itself is the only reliable indicator. Every board in this
+// family that carries an SX126x carries it inside a 1262MiniF27, and
+// every SX127x board is a bare RFM95. There is no strap worth reading:
+// GP15 was assumed to mark the revision and turned out to read low on
+// V1 hardware too, so it distinguished nothing.
+//
+// `radioModule=bare` remains the escape hatch if a plain SX1262 module
+// is ever fitted, since driving one as though it fed an amplifier would
+// under-power it badly.
 static bool resolveModulePa(const TrackerConfig &cfg, RadioChip detected) {
-    // An internal PA only exists behind an SX126x on this hardware, so
-    // never claim one on a board that answered as an SX127x - the drive
-    // table and the reported antenna power would both be nonsense.
-    if (detected != RADIO_CHIP_SX126X) return false;
-    if (strcasecmp(cfg.radioModule, "minif27") == 0) return true;
+    if (strcasecmp(cfg.radioModule, "minif27") == 0) return detected == RADIO_CHIP_SX126X;
     if (strcasecmp(cfg.radioModule, "bare") == 0)    return false;
-    return TrackerRadio::boardIsV2();
+    return detected == RADIO_CHIP_SX126X;
 }
 
 // Low data rate optimization is mandatory once a symbol lasts 16 ms or
