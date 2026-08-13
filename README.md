@@ -7,10 +7,12 @@
 One firmware image drives both board revisions. At boot the radio is
 identified over SPI and the matching driver is configured:
 
-| Board | Radio                          | GPS                    |
-|-------|--------------------------------|------------------------|
-| V1    | HopeRF RFM95W / Semtech SX1276 | u-blox NEO, UBX, 9600  |
-| V2    | G-NiceRF 1262MiniF27 (SX1262)  | ATGM336H, PCAS, 115200 |
+| Board | Radio                          | GPS                    | Output  |
+|-------|--------------------------------|------------------------|---------|
+| V1    | HopeRF RFM95W / Semtech SX1276 | u-blox NEO, UBX, 9600  | ~400 mW |
+| V2    | G-NiceRF 1262MiniF27 (SX1262)  | ATGM336H, PCAS, 115200 | ~500 mW |
+
+Both revisions are CE-RED certified.
 
 The revision is identified from the radio itself, read over SPI. The
 GP15 strap is not used for it - measurement showed it reads low on V1
