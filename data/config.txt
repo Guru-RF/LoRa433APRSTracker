@@ -57,5 +57,10 @@ i2cEnabled=true
 i2cDevice=BME680
 bme680TempOffset=0
 
+# --- USB ---
+# Stay off the air while a computer has the tracker enumerated;
+# eject the drive to transmit. false for a car head unit.
+usbTxInhibit=true
+
 # --- Debug ---
 fullDebug=false

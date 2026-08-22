@@ -46,7 +46,8 @@ Detection can be overridden from `config.txt` with `radioChip` and
 4. A drive named `RPI-RP2` will appear - copy the `.uf2` file to it
 5. The device reboots automatically and a new drive named `APRSTRKR` appears
 6. Edit `config.txt` on the drive (see Configuration below)
-7. Eject the drive - the device reboots with your settings
+7. Eject the drive - the device reboots with your settings and starts
+   transmitting. The drive stays offline until the tracker is re-powered
 
 ## Configuration
 
@@ -64,6 +65,30 @@ After flashing, the device presents as a USB drive with a `config.txt` file. Edi
   TCXO supply voltage such as `1.8` / `3.3`
 - **paDrive** - chip dBm into a module PA, -9..22 (V2 only)
 - **gpsBaud** - `0` to detect, or pin it (`9600` / `115200`)
+- **usbTxInhibit** - stay off the air while a computer has the tracker
+  enumerated (`true`/`false`, default `true`)
+
+### Transmitting while connected to a computer
+
+The amplifier draws a few hundred milliamps for the several seconds an SF12
+frame is on the air. Some PC USB ports cannot hold 5 V through that, and the
+undervoltage resets the tracker - in the worst case while the computer still
+has the config drive mounted and half-written. So the tracker stays off the
+air for as long as a computer has it enumerated, and says so on the console
+and by double-blinking the LoRa LED every 5 seconds.
+
+Only an actual USB host counts. A charger and the 13.8 V Powerpole never
+enumerate anything, so a deployed tracker beacons exactly as before.
+
+Ejecting the drive enables transmission for the rest of that power session -
+that is how to bench-test the PA with the tracker on USB. Ejecting also takes
+the config drive offline: unplug the tracker and power it again to get the
+drive back. Note that ejecting only says the computer has let go of the
+filesystem, so a brownout can no longer corrupt it; it does not make the port
+any stronger. If that port still cannot supply the transmitter the tracker
+will keep resetting, and unplugging it remains the way out.
+
+`usbTxInhibit=false` in `config.txt` turns the whole thing off.
 
 ### What `power` means depends on the board
 
@@ -100,6 +125,10 @@ To update to a new firmware version, either:
 - Repeat the Quick Install steps above with the new `.uf2` file, **or**
 - Edit `config.txt` on the USB drive, replace all content with just `firmwareupdate`, and eject - the device will reboot into UF2 bootloader mode ready for the new firmware
 
+Flashing through `reset.sh` reboots without a power cycle, so the config
+drive may not reappear until the tracker is unplugged and plugged back in.
+The `firmwareupdate` route above clears that by itself.
+
 ## Factory Reset
 
 Copy `flash_nuke.uf2` to the `RPI-RP2` drive to erase all flash, then reflash the firmware.
@@ -118,7 +147,9 @@ The firmware will be at `.pio/build/pico/firmware.uf2`.
 
 `tools/chipprobe/` holds several standalone firmwares for bringing up a
 new board. Only the `-tx` and `cwtest` builds transmit; the rest are
-passive and never enable the PA.
+passive and never enable the PA. They are separate binaries and are not
+subject to the transmit inhibit described above, which makes them the way
+to measure PA output with the tracker on a PC.
 
 ```console
 cd tools/chipprobe
@@ -151,6 +182,8 @@ tio --auto-connect new
 ```
 
 The console shows colored output with GPS status, LoRa TX frames, and voltage monitoring.
+On a computer the tracker is silent by design and prints why - see
+[Transmitting while connected to a computer](#transmitting-while-connected-to-a-computer).
 
 <img width="938" alt="TrackerTOP" src="https://github.com/Guru-RF/LoraAPRStracker/assets/1251767/c3a32cc5-92fe-420b-a335-53400f411a51">
 <img width="1076" alt="TrackerBottom" src="https://github.com/Guru-RF/LoraAPRStracker/assets/1251767/2ef5376d-9d41-4aac-892e-fea3d2fedd85">
@@ -163,6 +196,13 @@ there will be no amplified output.
 
 **V2 boards:** the amplifier is inside the radio module and is fed from
 the on-board buck regulator, so full output is available on USB-C as
-well as on the Powerpole. Do not connect both at once.
+well as on the Powerpole. Do not connect both at once. Note that the
+firmware will not transmit while a computer has the tracker enumerated -
+eject the drive, use a plain charger, or use the diagnostic firmwares.
+
+**Car head units are USB hosts.** A head unit or media player will
+enumerate the tracker and hold it silent for the whole journey. Power an
+in-car tracker from the Powerpole or a plain charger rather than a head
+unit's data port, or set `usbTxInhibit=false` in `config.txt`.
 
 Never transmit without an antenna or a 50 ohm dummy load on the SMA.

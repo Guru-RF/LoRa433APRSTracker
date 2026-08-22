@@ -15,6 +15,7 @@
 #include <Adafruit_BME680.h>
 #include <Adafruit_SHTC3.h>
 #include <hardware/watchdog.h>
+#include <tusb.h>
 
 #include "pins.h"
 #include "config_file.h"
@@ -147,10 +148,138 @@ static float getVoltage() {
 }
 
 // ============================================================
+// USB transmit inhibit
+//
+// The amplifier draws a few hundred milliamps for the several seconds
+// an SF12 frame is on the air. Some PC USB ports cannot hold 5 V
+// through that, and the resulting undervoltage resets the RP2040 -
+// in the worst case while the host still has the config drive mounted
+// and half-written. So the tracker stays off the air for as long as a
+// computer has it enumerated, and only for that long.
+//
+// The test is "is a host talking to us", not "is USB power present".
+// tud_mounted() reports whether a host has completed SET_CONFIGURATION,
+// which a charger and the 13.8 V Powerpole never do, so a deployed
+// tracker is unaffected.
+//
+// Enumeration is the signal rather than the mass-storage mount because
+// there is no dependable mount signal to use. FatFSUSB's onPlug only
+// fires on a SCSI START STOP UNIT load, which no operating system
+// sends when it mounts a volume, and PREVENT/ALLOW MEDIUM REMOVAL is
+// optional per host. SET_CONFIGURATION is mandatory USB and behaves
+// the same on macOS, Windows and Linux.
+//
+// Ejecting the drive lifts the inhibit for the rest of the power
+// session, which is the deliberate override for bench work: the host
+// has let go of the filesystem, so a brownout can no longer corrupt
+// it, and the operator has asked for the transmitter. Because the
+// eject reboots the board to apply the new config, the decision has to
+// outlive the reboot - see usbInhibitBegin() below.
+// ============================================================
+
+// scratch[0..1] carry reset_usb_boot()'s arguments through the bootrom
+// and [4..7] hold the SDK's reboot vector and watchdog magic, so [2] is
+// the one word free here. Scratch survives a reboot but is cleared by
+// a power-on reset, which is exactly when the drive should come back.
+// The magic guards against reading a register something else wrote.
+static const uint32_t      USB_EJECT_MAGIC      = 0x454A4354u;   // "EJCT"
+static const unsigned long USB_RELEASE_HOLD_MS  = 3000;
+static const unsigned long USB_INHIBIT_LOG_MS   = 60000;
+static const unsigned long USB_INHIBIT_BLINK_MS = 5000;
+
+static bool          usbEjected = false;
+static bool          usbInhibit = false;
+static bool          usbHostSeen = false;
+static unsigned long usbHostGoneSince = 0;
+static bool          usbHostGoneSinceValid = false;
+static unsigned long usbLastInhibitLog = 0;
+static unsigned long usbBlinkStart = 0;
+
+static bool txInhibited() {
+    return usbInhibit;
+}
+
+// Latch whether this boot came from ejecting the drive. Called first
+// thing in setup(), before anything else can disturb the register.
+static void usbInhibitBegin() {
+    usbEjected = (watchdog_hw->scratch[2] == USB_EJECT_MAGIC);
+}
+
+// Recompute the inhibit. Called once per loop and once in setup(),
+// before anything can decide to key the radio.
+static void usbInhibitUpdate() {
+    bool was = usbInhibit;
+
+    if (!cfg.usbTxInhibit || usbEjected) {
+        usbInhibit = false;
+    } else if (tud_mounted()) {
+        // Assert the moment a host appears. Being wrong the other way
+        // costs a reset on the host, so there is nothing to debounce.
+        usbHostSeen = true;
+        usbHostGoneSinceValid = false;
+        usbInhibit = true;
+    } else if (!usbHostSeen) {
+        usbInhibit = false;                 // charger, Powerpole or battery
+    } else {
+        // A bus reset zeroes the configuration for a moment. Hold the
+        // inhibit until the host has been gone long enough to mean it,
+        // rather than putting a 3.5 s frame on the air in the middle of
+        // a re-enumeration.
+        if (!usbHostGoneSinceValid) {
+            usbHostGoneSince = millis();
+            usbHostGoneSinceValid = true;
+        }
+        if ((millis() - usbHostGoneSince) >= USB_RELEASE_HOLD_MS) {
+            usbHostSeen = false;
+            usbHostGoneSinceValid = false;
+            usbInhibit = false;
+        }
+    }
+
+    if (usbInhibit && !was) {
+        yellow("TX INHIBITED: USB host connected - eject the APRSTRKR drive to transmit");
+        usbLastInhibitLog = millis();
+        usbBlinkStart = millis();
+    } else if (!usbInhibit && was) {
+        green("TX ENABLED: USB host disconnected");
+        digitalWrite(PIN_LED_LORA, LOW);
+    }
+}
+
+// Say why the tracker is quiet, for as long as it is quiet. Nobody
+// watches a serial console in a car, so the LoRa LED - idle in this
+// state, and unmistakably different from a TX flash - double-blinks
+// every 5 s alongside the console line.
+static void usbInhibitHold() {
+    unsigned long now = millis();
+
+    if ((now - usbLastInhibitLog) >= USB_INHIBIT_LOG_MS) {
+        usbLastInhibitLog = now;
+        yellow("TX inhibited - USB host still connected");
+    }
+
+    unsigned long phase = now - usbBlinkStart;
+    if (phase >= USB_INHIBIT_BLINK_MS) {
+        usbBlinkStart = now;
+        phase = 0;
+    }
+    bool on = (phase < 100) || (phase >= 200 && phase < 300);
+    digitalWrite(PIN_LED_LORA, on ? HIGH : LOW);
+}
+
+// ============================================================
 // LoRa Send
 // ============================================================
 
 static void loraSendText(const char *text) {
+    // Backstop for the gate in loop(). Whatever reaches this function,
+    // nothing is keyed while a host has the tracker enumerated - and
+    // this sits above the PA enable below, so GP2 never rises either.
+    if (txInhibited()) {
+        yellow("TX inhibited - frame not sent");
+        return;
+    }
+
     watchdog_update();
     digitalWrite(PIN_LED_LORA, HIGH);
 
@@ -413,10 +542,16 @@ static void sendVoltageAlert(int vx100) {
 
 // ============================================================
 // USB drive ready callback
+//
+// After an eject the medium is genuinely gone: TinyUSB answers every
+// TEST UNIT READY with "medium not present", so no host can mount the
+// volume again until the tracker is re-powered, and the inhibit has
+// nothing left to hold. The USB descriptor is the same either way, so
+// the serial port the operator is watching does not move.
 // ============================================================
 
 static bool usbDriveReady(uint32_t) {
-    return true;
+    return !usbEjected;
 }
 
 // ============================================================
@@ -425,6 +560,9 @@ static bool usbDriveReady(uint32_t) {
 
 void setup() {
     // No watchdog during init - enable at end of setup()
+
+    // Whether the last reboot came from ejecting the drive
+    usbInhibitBegin();
 
     // LEDs
     pinMode(PIN_LED_PWR, OUTPUT);
@@ -486,13 +624,27 @@ void setup() {
             delay(500);
             red("Rebooting into UF2 bootloader...");
             delay(500);
+            // Getting here means the drive was ejected, and neither the
+            // bootloader nor a UF2 copy clears the latch. Drop it, or
+            // the newly flashed firmware comes up with no config drive.
+            watchdog_hw->scratch[2] = 0;
             reset_usb_boot(0, 0);
             while (true);
         }
     }
 
     // Start USB mass storage (after all file operations)
-    FatFSUSB.onUnplug([](uint32_t) { rp2040.reboot(); });
+    //
+    // Ejecting reboots so the new config takes effect, and the eject is
+    // latched first so the boot that follows presents no medium and
+    // transmits. This runs in interrupt context, so it does one store
+    // and reboots - no Serial, no flash. The early return keeps a host
+    // ejecting the empty drive from rebooting us round in a loop.
+    FatFSUSB.onUnplug([](uint32_t) {
+        if (watchdog_hw->scratch[2] == USB_EJECT_MAGIC) return;
+        watchdog_hw->scratch[2] = USB_EJECT_MAGIC;
+        rp2040.reboot();
+    });
     FatFSUSB.driveReady(usbDriveReady);
     FatFSUSB.begin();
 
@@ -505,7 +657,14 @@ void setup() {
     while (!Serial && (millis() - usbWait) < 2500) delay(10);
     delay(250);
 
-    green("USB mass storage active");
+    if (usbEjected) {
+        green("USB mass storage offline - drive was ejected, transmit enabled");
+    } else if (cfg.usbTxInhibit) {
+        green("USB mass storage active - transmit held off while a host is connected");
+    } else {
+        green("USB mass storage active");
+        yellow("usbTxInhibit=false - transmitting with a USB host connected");
+    }
 
     // Print config summary
     snprintf(banner, sizeof(banner), " -- Tracker Booted: %s -=- %s", cfg.callsign, VERSION);
@@ -633,8 +792,18 @@ void setup() {
     }
 
     // Build and send telemetry metadata immediately (PA test - no GPS needed)
+    //
+    // The call is skipped rather than the transmission inside it:
+    // sendMetadata() clears metadataForced as its first act, so
+    // suppressing the RF instead would leave receivers with no
+    // PARM/UNIT/EQNS to decode telemetry with for the next 24 hours.
     buildMetadata();
-    sendMetadata();
+    usbInhibitUpdate();
+    if (txInhibited()) {
+        yellow("Telemetry metadata held until the drive is ejected");
+    } else {
+        sendMetadata();
+    }
 
     // Init beacon engine
     sb.reset();
@@ -655,6 +824,19 @@ void setup() {
 
 void loop() {
     watchdog_update();
+
+    // Recompute the inhibit before anything can decide to key the
+    // radio. GPS, the LEDs and the console keep running while it
+    // holds - only the transmitter stops.
+    usbInhibitUpdate();
+    if (txInhibited()) {
+        usbInhibitHold();
+    } else if (metadataForced) {
+        // Held back at boot because a host was connected. Send it as
+        // soon as the inhibit lifts, without waiting for a GPS fix, so
+        // a bench PA test still gets its metadata.
+        sendMetadata();
+    }
 
     // Feed GPS data
     while (gpsSerial.available()) {
@@ -708,6 +890,23 @@ void loop() {
                  jitter.isStationary() ? "Y" : "N",
                  movedM);
         purple(buf);
+    }
+
+    // Everything below this line does nothing but decide to key the
+    // transmitter, so the inhibit stops here rather than at the radio.
+    // Taking the decision and then suppressing the RF would burn a
+    // sequence number into flash for a frame nobody hears, stamp
+    // lastVoltageWarning on an alert that never went out, and clear
+    // metadataForced. It has to stay above sb.shouldBeacon() in
+    // particular: suppressing between that call and updateAfterBeacon()
+    // leaves the SmartBeacon anchor unset, which makes shouldBeacon()
+    // true on every 50 ms pass and erases a flash sector each time.
+    //
+    // jitter.stabilize() above keeps running on purpose - it is the
+    // position filter and its anchor needs continuous GPS.
+    if (txInhibited()) {
+        delay(50);
+        return;
     }
 
     // Determine whether to beacon

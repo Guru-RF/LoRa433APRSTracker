@@ -26,6 +26,11 @@ extern FS FatFS;
 #define DEFAULT_I2C_DEVICE    "BME680"
 #define DEFAULT_BME680_OFFSET 0
 #define DEFAULT_FULL_DEBUG    false
+// Hold off transmitting while a computer has the tracker
+// enumerated over USB. Set false only where the tracker is
+// powered from a USB host that is expected to stay attached,
+// such as a car head unit - see src/main.cpp for why it exists.
+#define DEFAULT_USB_TX_INHIBIT true
 #define DEFAULT_LORA_FREQ     433.775f
 
 // Radio chip: "auto" identifies SX1276/RFM95 vs SX1262 over SPI at boot.
@@ -98,6 +103,7 @@ struct TrackerConfig {
     char   i2cDevice[16];
     int    bme680TempOffset;
     bool   fullDebug;
+    bool   usbTxInhibit;
     float  loraFrequency;
     char   radioChip[12];
     char   loraTcxo[8];
@@ -143,6 +149,7 @@ static void configSetDefaults(TrackerConfig &cfg) {
     strncpy(cfg.i2cDevice, DEFAULT_I2C_DEVICE, sizeof(cfg.i2cDevice));
     cfg.bme680TempOffset = DEFAULT_BME680_OFFSET;
     cfg.fullDebug = DEFAULT_FULL_DEBUG;
+    cfg.usbTxInhibit = DEFAULT_USB_TX_INHIBIT;
     cfg.loraFrequency = DEFAULT_LORA_FREQ;
     strncpy(cfg.radioChip, DEFAULT_RADIO_CHIP, sizeof(cfg.radioChip));
     strncpy(cfg.loraTcxo, DEFAULT_LORA_TCXO, sizeof(cfg.loraTcxo));
@@ -226,6 +233,8 @@ static void configSetValue(TrackerConfig &cfg, const char *key, const char *val)
         cfg.bme680TempOffset = constrain(atoi(val), 0, 99);
     } else if (strcasecmp(key, "fullDebug") == 0) {
         cfg.fullDebug = (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0);
+    } else if (strcasecmp(key, "usbTxInhibit") == 0) {
+        cfg.usbTxInhibit = (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0);
     } else if (strcasecmp(key, "loraFrequency") == 0) {
         cfg.loraFrequency = atof(val);
     } else if (strcasecmp(key, "radioChip") == 0) {
@@ -314,6 +323,11 @@ static const char *CONFIG_TEMPLATE =
     "i2cDevice=BME680\n"
     "bme680TempOffset=0\n"
     "\n"
+    "# --- USB ---\n"
+    "# Stay off the air while a computer has the tracker enumerated;\n"
+    "# eject the drive to transmit. false for a car head unit.\n"
+    "usbTxInhibit=true\n"
+    "\n"
     "# --- Debug ---\n"
     "fullDebug=false\n";
 
@@ -359,6 +373,10 @@ static bool configCreateDefault() {
     f.println("i2cEnabled=true");
     f.println("i2cDevice=BME680");
     f.println("bme680TempOffset=0");
+    f.println("");
+    f.println("# Stay off the air while a computer has the tracker enumerated;");
+    f.println("# eject the drive to transmit. false for a car head unit.");
+    f.println("usbTxInhibit=true");
     f.println("");
     f.println("fullDebug=false");
     f.close();
