@@ -1,60 +1,98 @@
-# V2 board goes dark at the first beacon
+# V2 board hangs at the first transmission
 
-**Status:** open as of 2026-08-22. Present in `main` and in the unpublished
-`v2.1.0` draft release.
+**Status:** root cause narrowed, workaround known, one firmware bug fixed.
+Last updated 2026-08-30 from a bench session with a serial console attached.
 
-## Symptom
+## What actually happens
 
-V2 board (SX1262 + ATGM336H), powered from the 13.8 V Powerpole with no USB
-attached. The tracker boots normally, the power LED lights, the GPS LED blinks
-while acquiring - and the moment the GPS LED goes steady, all three LEDs go
-dark and **stay** dark until the tracker is unplugged.
+The tracker hangs inside `loraSendText()` on the first frame it tries to put
+on the air. Everything before that is healthy: the radio is detected, the GPS
+locks, the console runs for as long as you like - provided nothing transmits.
 
-With the GPS disconnected it runs indefinitely, probing for a receiver. So the
-fault is reached only after a fix.
+Two presentations, and they turn out to be the same fault at different drive
+levels:
 
-The first fix triggers a beacon immediately: SmartBeacon's `_lastLat` stays at
-999 until the first `updateAfterBeacon()`, so `shouldBeacon()` returns true
-unconditionally on the first pass with a fix (`include/smartbeacon.h`). The
-first transmission after lock is therefore what kills it.
+- **Hung, LEDs lit.** Power LED bright, LoRa LED stuck on, USB gone, dead
+  until physically re-powered. The LoRa LED is the tell: `loraSendText()`
+  raises it before keying and lowers it after, so a stuck LED puts the hang
+  between those two lines.
+- **Dark.** Reported from the field at full drive.
+
+RP2040 pads latch their state through a hang, so lit LEDs prove the 3V3 rail
+is up and the CPU has stopped - not a reset and not a power failure.
+
+## Root cause
+
+RadioLib waits for BUSY to fall after SetTx **with no timeout of its own**
+(`src/radio.cpp`). When the SX1262 is asked for its maximum +22 dBm PA
+configuration (`paDutyCycle=4, hpMax=7`) on this module, BUSY never falls and
+the driver spins forever. The chip reports no error - it simply stops
+answering.
+
+It is the *top of the drive range* that fails, not the current drawn getting
+there. Throttling by either available route avoids it:
+
+| `paDrive` | `loraOcp` | result |
+|-----------|-----------|--------------------------------------------------|
+| 22        | 140       | hangs in `startTransmit`, LoRa LED stuck on      |
+| 22        | 60        | works - the die's OCP clamps it below +22 dBm    |
+| 14        | 140       | works - three metadata frames and beacons, stable |
+
+`loraOcp=60` is not a usable setting: the die needs ~118 mA to make +22 dBm,
+so clamping to 60 buys survival by throttling the transmitter below useful
+output. Nothing was heard on an iGate 8 m away.
+
+**Working setting today: `paDrive=14`.** Note this contradicts commit bfe48bf,
+which set `paDrive=22` deliberately because that is what the module needs for
+its rated output. The board therefore cannot currently reach rated power.
+
+## The firmware bug, now fixed
+
+`sendMetadata()` used to run *before* `watchdog_enable(5000, true)`, so the
+three telemetry frames every boot sends went out with no watchdog armed. A
+BUSY stall there had no backstop and hung the board until someone unplugged
+it - in a vehicle, silently and permanently. The same stall in `loop()` would
+have been a 5 s reset.
+
+`watchdog_enable()` now runs before the first transmission. This does not stop
+the stall; it makes it survivable.
 
 ## Ruled out - do not re-derive
 
-- **The USB transmit inhibit.** Powerpole-only never enumerates, so
-  `tud_mounted()` is false, `usbHostSeen` is never set and the gate is inert.
-- **A firmware hang.** A hung CPU leaves GPIOs latched, so `PIN_LED_PWR` -
-  driven high once in `setup()` and never touched again - would stay lit.
-- **A watchdog reset.** It re-runs `setup()` and relights `PIN_LED_PWR` within
-  microseconds. The owner confirmed it stays dark, so nothing is rebooting.
-- **PA drive current on its own.** The boot metadata already transmits three
-  frames at full power and survives. `paDrive` is not the trigger.
+- **Supply, current, and voltage drop.** Measured by the board owner at
+  another location, from USB-C *and* from the Powerpole. Not a brownout. The
+  3V3 LDO arithmetic (XC6206P332MR, 200 mA, versus ~118 mA for the die at
+  +22 dBm) looks alarming on paper and is *not* what is happening.
+- **TCXO / oscillator.** The MiniF27 datasheet block diagram shows a plain
+  32 MHz crystal and no DIO3 supply path; DIO3 is brought out to the host as a
+  free pin. `probeTcxoVoltage()` printing `clock: crystal` is correct. Forcing
+  `loraTcxo=1.8` appeared to fix it once and did not - that was an intermittent
+  fault reproducing intermittently.
+- **Time on air.** It dies mid-first-frame: ~2.0 s elapsed against 2.55 s
+  needed to complete the shortest metadata frame (250 ms PA settle + 2302 ms
+  at SF12/BW125/CR4:5). It never finishes a frame, so frame length is
+  irrelevant and shortening `comment=` proves nothing - `comment=` does not
+  appear in a metadata frame at all.
+- **GP2 / PA enable.** `GP2` is not connected to anything on the V2
+  schematic. The MiniF27 has no enable pin; its antenna switch is driven
+  internally from DIO2, which never leaves the module. `loraSendText()`
+  asserting GP2 and waiting 250 ms is dead code on V2.
+- **I2C sensor init.** It died there once, before `sendMetadata()`, and walked
+  straight through on every subsequent boot. That was a red herring.
+- **The missing `-u _printf_float`.** Real, and fixed, but runtime-benign:
+  varargs stay aligned, and config parsing uses `atof()`, never `scanf`.
 
-Between them these eliminate software as the direct cause: firmware cannot
-turn its own power LED off while running, and nothing is resetting.
+## Still open
 
-## Leading hypothesis
+Why BUSY never falls at +22 dBm on this module, given the supply is sound.
+Worth trying next:
 
-Time on air rather than peak current. The boot metadata is ~60 B, ~2.6 s on
-air; a position beacon is ~95 B, ~3.7 s - roughly 40% longer at the same draw.
-A marginal supply survives the short transmission and not the long one.
-
-Once it browns out mid-transmit, GP2 (`PIN_PA`) goes hi-Z, because it is only
-driven low inside `setup()`. With no pull-down on the PA enable, the amplifier
-stays keyed and holds the rail down, so the board never gets far enough to
-boot. That matches "dark, and stays dark until unplugged" exactly.
-
-## Next tests
-
-1. **Config only, no reflash:** shorten `comment=` in `config.txt` to a couple
-   of characters. That cuts payload and time on air and changes nothing else.
-   Surviving with a short comment and dying with a long one confirms a
-   duration/current threshold.
-2. **Meter or scope on the rail during transmit.**
-3. **Check whether GP2 has a pull-down** in the schematic.
-
-## Caveat on the regression window
-
-The owner reports that "the previous release worked fine", but that was most
-likely a V1 board. `v2.0.1` is built on `LoRa.h`, which cannot drive an SX1262
-at all, so it is not a usable control on V2 hardware. This may be a V2
-bring-up problem rather than a regression from the V1/V2 firmware work.
+1. `tools/chipprobe -e radiotest-tx`, which sends three frames at die drive
+   0, 10 and 22 dBm in one boot and prints the SX126x device-errors word after
+   each. That is the instrumented version of the sweep done here by hand.
+   Change `DEFAULT_CALLSIGN` before building or it transmits as ON9RFG.
+2. Bisect `paDrive` between 14 and 22 to find the exact threshold.
+3. Read `GetDeviceErrors` (0x17) after a transmit in `TrackerRadio::send()`
+   and report PA_RAMP / PLL_LOCK, so the firmware says why rather than hanging.
+4. Give the BUSY wait a bound so a stall degrades to `TX FAILED` instead of
+   relying on a watchdog reset.

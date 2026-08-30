@@ -242,14 +242,18 @@ static void usbInhibitUpdate() {
         usbBlinkStart = millis();
     } else if (!usbInhibit && was) {
         green("TX ENABLED: USB host disconnected");
-        digitalWrite(PIN_LED_LORA, LOW);
+        digitalWrite(PIN_LED_PWR, HIGH);     // end any wink mid-cycle
     }
 }
 
 // Say why the tracker is quiet, for as long as it is quiet. Nobody
-// watches a serial console in a car, so the LoRa LED - idle in this
-// state, and unmistakably different from a TX flash - double-blinks
-// every 5 s alongside the console line.
+// watches a serial console in a car, so the power LED - otherwise
+// steady - winks briefly every 5 s alongside the console line.
+//
+// Deliberately NOT the LoRa LED. That one means "the transmitter is
+// keyed", and blinking it to report the opposite reads as normal
+// beaconing: it cost a bench session chasing an iGate that was
+// receiving nothing because nothing was ever sent.
 static void usbInhibitHold() {
     unsigned long now = millis();
 
@@ -263,8 +267,7 @@ static void usbInhibitHold() {
         usbBlinkStart = now;
         phase = 0;
     }
-    bool on = (phase < 100) || (phase >= 200 && phase < 300);
-    digitalWrite(PIN_LED_LORA, on ? HIGH : LOW);
+    digitalWrite(PIN_LED_PWR, (phase < 100) ? LOW : HIGH);
 }
 
 // ============================================================
@@ -798,6 +801,21 @@ void setup() {
     // suppressing the RF instead would leave receivers with no
     // PARM/UNIT/EQNS to decode telemetry with for the next 24 hours.
     buildMetadata();
+
+    // Arm the watchdog *before* the first transmission, not after setup.
+    //
+    // RadioLib waits for BUSY to fall after SetTx with no timeout of its
+    // own, so a module whose PA cannot ramp spins there forever. That is
+    // survivable in loop(), where the watchdog resets the board - but
+    // these three metadata frames used to go out while the watchdog was
+    // still off, so the same stall bricked the tracker until someone
+    // physically unplugged it. Observed on a V2 board: power LED lit,
+    // LoRa LED stuck on mid-frame, USB gone, dead until repowered.
+    //
+    // Everything from here on either feeds the watchdog or completes in
+    // well under 5 s, so there is nothing left that needs it disabled.
+    watchdog_enable(5000, true);
+
     usbInhibitUpdate();
     if (txInhibited()) {
         yellow("Telemetry metadata held until the drive is ejected");
@@ -811,9 +829,6 @@ void setup() {
 
     // Init GPS LED timing
     gpsLastBlink = millis() - (unsigned long)(cfg.gpsBlinkInterval * 1000);
-
-    // NOW enable watchdog (5 sec) - setup is done
-    watchdog_enable(5000, true);
 
     yellow("Start Tracking");
 }

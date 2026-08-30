@@ -32,8 +32,12 @@ region, so ordinary flashing leaves the filesystem alone. Back up
 - **The radio interrupt line is not routed** on either revision, so transmit
   is polled rather than interrupt-driven. The poll loop feeds the watchdog,
   which the old blocking `LoRa.endPacket()` could not.
-- **RadioLib waits on BUSY with no timeout** after SetTx. A module whose PA
-  supply is absent spins there; the 5 s watchdog is the only backstop.
+- **RadioLib waits on BUSY with no timeout** after SetTx, and the SX1262
+  does it for real on V2 at `paDrive=22` - the driver spins forever and the
+  chip reports no error. The 5 s watchdog is the only backstop, so it is now
+  armed *before* the boot metadata burst rather than after; it used to be
+  enabled last, which left every boot's first three frames unprotected and
+  turned a stall into a board that was dead until unplugged.
 - **`config.txt` keys that are absent fall back to firmware defaults.** Older
   files on deployed devices lack the newer keys, so a default change silently
   changes behaviour in the field.
@@ -62,9 +66,10 @@ makes `shouldBeacon()` true on every 50 ms pass and erases a flash sector each
 time. Suppress the *call* to `sendMetadata()`, never the transmission inside
 it, or `metadataForced` is consumed and receivers lose PARM/UNIT/EQNS.
 
-## Open: V2 board dies at the first beacon
+## Open: V2 board hangs at the first transmission
 
-See [docs/v2-beacon-crash.md](docs/v2-beacon-crash.md). Unresolved as of
-2026-08-22, and it is in `main` and in the unpublished `v2.1.0` draft release.
-Read the ruled-out list before proposing a cause - four hypotheses are already
-eliminated with evidence.
+See [docs/v2-beacon-crash.md](docs/v2-beacon-crash.md). `paDrive=14` is the
+working setting; `paDrive=22`, which the module wants for rated output, hangs
+the driver. Read the ruled-out list before proposing a cause - supply current,
+the oscillator, time on air and GP2 are all eliminated with evidence, most of
+them after being confidently asserted and then disproved.

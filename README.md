@@ -75,7 +75,8 @@ frame is on the air. Some PC USB ports cannot hold 5 V through that, and the
 undervoltage resets the tracker - in the worst case while the computer still
 has the config drive mounted and half-written. So the tracker stays off the
 air for as long as a computer has it enumerated, and says so on the console
-and by double-blinking the LoRa LED every 5 seconds.
+and by winking the power LED once every 5 seconds. The LoRa LED is left
+alone, so a blinking LoRa LED always means the transmitter is keyed.
 
 Only an actual USB host counts. A charger and the 13.8 V Powerpole never
 enumerate anything, so a deployed tracker beacons exactly as before.
@@ -196,7 +197,8 @@ there will be no amplified output.
 
 **V2 boards:** the amplifier is inside the radio module and is fed from
 the on-board buck regulator, so full output is available on USB-C as
-well as on the Powerpole. Do not connect both at once. Note that the
+well as on the Powerpole. USB-C and the Powerpole may be connected at
+the same time - the board protects against it. Note that the
 firmware will not transmit while a computer has the tracker enumerated -
 eject the drive, use a plain charger, or use the diagnostic firmwares.
 
