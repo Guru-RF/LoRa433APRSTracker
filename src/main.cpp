@@ -148,19 +148,25 @@ static float getVoltage() {
 }
 
 // ============================================================
-// USB transmit inhibit
+// USB power budget
 //
-// The amplifier draws a few hundred milliamps for the several seconds
-// an SF12 frame is on the air. Some PC USB ports cannot hold 5 V
-// through that, and the resulting undervoltage resets the RP2040 -
-// in the worst case while the host still has the config drive mounted
-// and half-written. So the tracker stays off the air for as long as a
-// computer has it enumerated, and only for that long.
+// This board cannot transmit at rated drive while a computer has it
+// enumerated. The PA ramp does not complete, RadioLib waits on BUSY
+// with no timeout of its own, and the tracker stops dead mid-frame -
+// measured on a V2 board at paDrive 20 and 22, working at 14 and
+// below, and working at 22 the moment USB-C is unplugged and it runs
+// from the Powerpole alone.
+//
+// So the drive is chosen per frame instead: rated power when nothing
+// is enumerated, cfg.usbPaDrive when something is. That follows the
+// cable with no reboot, and unlike refusing to transmit it leaves the
+// tracker audible on the bench - which is how you tell a working
+// tracker from a silent one.
 //
 // The test is "is a host talking to us", not "is USB power present".
 // tud_mounted() reports whether a host has completed SET_CONFIGURATION,
 // which a charger and the 13.8 V Powerpole never do, so a deployed
-// tracker is unaffected.
+// tracker always runs at full drive.
 //
 // Enumeration is the signal rather than the mass-storage mount because
 // there is no dependable mount signal to use. FatFSUSB's onPlug only
@@ -169,86 +175,78 @@ static float getVoltage() {
 // optional per host. SET_CONFIGURATION is mandatory USB and behaves
 // the same on macOS, Windows and Linux.
 //
-// Ejecting the drive lifts the inhibit for the rest of the power
-// session, which is the deliberate override for bench work: the host
-// has let go of the filesystem, so a brownout can no longer corrupt
-// it, and the operator has asked for the transmitter. Because the
-// eject reboots the board to apply the new config, the decision has to
-// outlive the reboot - see usbInhibitBegin() below.
+// usbTxInhibit=true keeps the old behaviour - silence rather than low
+// power - for a port that cannot give even the floor drive.
 // ============================================================
 
-// scratch[0..1] carry reset_usb_boot()'s arguments through the bootrom
-// and [4..7] hold the SDK's reboot vector and watchdog magic, so [2] is
-// the one word free here. Scratch survives a reboot but is cleared by
-// a power-on reset, which is exactly when the drive should come back.
-// The magic guards against reading a register something else wrote.
-static const uint32_t      USB_EJECT_MAGIC      = 0x454A4354u;   // "EJCT"
 static const unsigned long USB_RELEASE_HOLD_MS  = 3000;
 static const unsigned long USB_INHIBIT_LOG_MS   = 60000;
 static const unsigned long USB_INHIBIT_BLINK_MS = 5000;
 
-static bool          usbEjected = false;
+static bool          usbHost = false;       // debounced tud_mounted()
 static bool          usbInhibit = false;
-static bool          usbHostSeen = false;
 static unsigned long usbHostGoneSince = 0;
 static bool          usbHostGoneSinceValid = false;
 static unsigned long usbLastInhibitLog = 0;
 static unsigned long usbBlinkStart = 0;
 
+static bool usbHostPresent() {
+    return usbHost;
+}
+
 static bool txInhibited() {
     return usbInhibit;
 }
 
-// Latch whether this boot came from ejecting the drive. Called first
-// thing in setup(), before anything else can disturb the register.
-static void usbInhibitBegin() {
-    usbEjected = (watchdog_hw->scratch[2] == USB_EJECT_MAGIC);
-}
-
-// Recompute the inhibit. Called once per loop and once in setup(),
+// Recompute the host state. Called once per loop and once in setup(),
 // before anything can decide to key the radio.
 static void usbInhibitUpdate() {
-    bool was = usbInhibit;
+    bool wasHost    = usbHost;
+    bool wasInhibit = usbInhibit;
 
-    if (!cfg.usbTxInhibit || usbEjected) {
-        usbInhibit = false;
-    } else if (tud_mounted()) {
+    if (tud_mounted()) {
         // Assert the moment a host appears. Being wrong the other way
-        // costs a reset on the host, so there is nothing to debounce.
-        usbHostSeen = true;
+        // costs a stalled transmitter, so there is nothing to debounce.
+        usbHost = true;
         usbHostGoneSinceValid = false;
-        usbInhibit = true;
-    } else if (!usbHostSeen) {
-        usbInhibit = false;                 // charger, Powerpole or battery
-    } else {
-        // A bus reset zeroes the configuration for a moment. Hold the
-        // inhibit until the host has been gone long enough to mean it,
-        // rather than putting a 3.5 s frame on the air in the middle of
-        // a re-enumeration.
+    } else if (usbHost) {
+        // A bus reset zeroes the configuration for a moment. Hold until
+        // the host has been gone long enough to mean it, rather than
+        // stepping up to rated drive in the middle of a re-enumeration.
         if (!usbHostGoneSinceValid) {
             usbHostGoneSince = millis();
             usbHostGoneSinceValid = true;
         }
         if ((millis() - usbHostGoneSince) >= USB_RELEASE_HOLD_MS) {
-            usbHostSeen = false;
+            usbHost = false;
             usbHostGoneSinceValid = false;
-            usbInhibit = false;
         }
     }
 
-    if (usbInhibit && !was) {
-        yellow("TX INHIBITED: USB host connected - eject the APRSTRKR drive to transmit");
+    usbInhibit = cfg.usbTxInhibit && usbHost;
+
+    if (usbHost && !wasHost) {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "USB host connected - drive reduced to %d dBm",
+                 cfg.usbPaDrive);
+        yellow(cfg.usbTxInhibit ? "USB host connected - transmit inhibited" : buf);
+    } else if (!usbHost && wasHost) {
+        green("USB host disconnected - rated drive restored");
+    }
+
+    if (usbInhibit && !wasInhibit) {
         usbLastInhibitLog = millis();
         usbBlinkStart = millis();
-    } else if (!usbInhibit && was) {
-        green("TX ENABLED: USB host disconnected");
+    } else if (!usbInhibit && wasInhibit) {
         digitalWrite(PIN_LED_PWR, HIGH);     // end any wink mid-cycle
     }
 }
 
-// Say why the tracker is quiet, for as long as it is quiet. Nobody
-// watches a serial console in a car, so the power LED - otherwise
-// steady - winks briefly every 5 s alongside the console line.
+// Say why the tracker is quiet, for as long as it is quiet. Only
+// reachable with usbTxInhibit=true; the default now transmits at
+// reduced drive and has nothing to explain. Nobody watches a serial
+// console in a car, so the power LED - otherwise steady - winks
+// briefly every 5 s alongside the console line.
 //
 // Deliberately NOT the LoRa LED. That one means "the transmitter is
 // keyed", and blinking it to report the opposite reads as normal
@@ -285,6 +283,13 @@ static void loraSendText(const char *text) {
 
     watchdog_update();
     digitalWrite(PIN_LED_LORA, HIGH);
+
+    // Rated drive stalls the PA ramp on USB power; see the USB power
+    // budget notes above. Set per frame so unplugging the cable
+    // restores full output on the very next beacon.
+    int8_t ratedDrive = TrackerRadio::hasModulePa() ? (int8_t)cfg.paDrive
+                                                    : (int8_t)cfg.power;
+    TrackerRadio::setDrive(usbHostPresent() ? (int8_t)cfg.usbPaDrive : ratedDrive);
 
     // On a module with its own amplifier the enable line is not
     // optional: if GP2 gates that amplifier's supply, transmitting with
@@ -546,15 +551,10 @@ static void sendVoltageAlert(int vx100) {
 // ============================================================
 // USB drive ready callback
 //
-// After an eject the medium is genuinely gone: TinyUSB answers every
-// TEST UNIT READY with "medium not present", so no host can mount the
-// volume again until the tracker is re-powered, and the inhibit has
-// nothing left to hold. The USB descriptor is the same either way, so
-// the serial port the operator is watching does not move.
 // ============================================================
 
 static bool usbDriveReady(uint32_t) {
-    return !usbEjected;
+    return true;
 }
 
 // ============================================================
@@ -563,9 +563,6 @@ static bool usbDriveReady(uint32_t) {
 
 void setup() {
     // No watchdog during init - enable at end of setup()
-
-    // Whether the last reboot came from ejecting the drive
-    usbInhibitBegin();
 
     // LEDs
     pinMode(PIN_LED_PWR, OUTPUT);
@@ -627,27 +624,15 @@ void setup() {
             delay(500);
             red("Rebooting into UF2 bootloader...");
             delay(500);
-            // Getting here means the drive was ejected, and neither the
-            // bootloader nor a UF2 copy clears the latch. Drop it, or
-            // the newly flashed firmware comes up with no config drive.
-            watchdog_hw->scratch[2] = 0;
             reset_usb_boot(0, 0);
             while (true);
         }
     }
 
-    // Start USB mass storage (after all file operations)
-    //
-    // Ejecting reboots so the new config takes effect, and the eject is
-    // latched first so the boot that follows presents no medium and
-    // transmits. This runs in interrupt context, so it does one store
-    // and reboots - no Serial, no flash. The early return keeps a host
-    // ejecting the empty drive from rebooting us round in a loop.
-    FatFSUSB.onUnplug([](uint32_t) {
-        if (watchdog_hw->scratch[2] == USB_EJECT_MAGIC) return;
-        watchdog_hw->scratch[2] = USB_EJECT_MAGIC;
-        rp2040.reboot();
-    });
+    // Start USB mass storage (after all file operations). Ejecting
+    // reboots so the new config takes effect - and nothing more, now
+    // that the transmitter no longer depends on the eject.
+    FatFSUSB.onUnplug([](uint32_t) { rp2040.reboot(); });
     FatFSUSB.driveReady(usbDriveReady);
     FatFSUSB.begin();
 
@@ -660,14 +645,7 @@ void setup() {
     while (!Serial && (millis() - usbWait) < 2500) delay(10);
     delay(250);
 
-    if (usbEjected) {
-        green("USB mass storage offline - drive was ejected, transmit enabled");
-    } else if (cfg.usbTxInhibit) {
-        green("USB mass storage active - transmit held off while a host is connected");
-    } else {
-        green("USB mass storage active");
-        yellow("usbTxInhibit=false - transmitting with a USB host connected");
-    }
+    green("USB mass storage active");
 
     // Print config summary
     snprintf(banner, sizeof(banner), " -- Tracker Booted: %s -=- %s", cfg.callsign, VERSION);
@@ -818,7 +796,7 @@ void setup() {
 
     usbInhibitUpdate();
     if (txInhibited()) {
-        yellow("Telemetry metadata held until the drive is ejected");
+        yellow("Telemetry metadata held while a USB host is connected");
     } else {
         sendMetadata();
     }

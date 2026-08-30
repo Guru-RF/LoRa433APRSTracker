@@ -26,11 +26,15 @@ extern FS FatFS;
 #define DEFAULT_I2C_DEVICE    "BME680"
 #define DEFAULT_BME680_OFFSET 0
 #define DEFAULT_FULL_DEBUG    false
-// Hold off transmitting while a computer has the tracker
-// enumerated over USB. Set false only where the tracker is
-// powered from a USB host that is expected to stay attached,
-// such as a car head unit - see src/main.cpp for why it exists.
-#define DEFAULT_USB_TX_INHIBIT true
+// Transmit drive used while a computer has the tracker enumerated
+// over USB. Rated drive stalls the PA ramp on USB power; -9 is the
+// SX1262's floor into a module amplifier and is still tens of dB
+// above what a nearby receiver needs. See src/main.cpp.
+#define DEFAULT_USB_PA_DRIVE  -9
+// Refuse to transmit at all while a computer is attached, rather than
+// dropping to usbPaDrive. For a port that cannot supply even the
+// floor drive.
+#define DEFAULT_USB_TX_INHIBIT false
 #define DEFAULT_LORA_FREQ     433.775f
 
 // Radio chip: "auto" identifies SX1276/RFM95 vs SX1262 over SPI at boot.
@@ -104,6 +108,7 @@ struct TrackerConfig {
     int    bme680TempOffset;
     bool   fullDebug;
     bool   usbTxInhibit;
+    int    usbPaDrive;
     float  loraFrequency;
     char   radioChip[12];
     char   loraTcxo[8];
@@ -150,6 +155,7 @@ static void configSetDefaults(TrackerConfig &cfg) {
     cfg.bme680TempOffset = DEFAULT_BME680_OFFSET;
     cfg.fullDebug = DEFAULT_FULL_DEBUG;
     cfg.usbTxInhibit = DEFAULT_USB_TX_INHIBIT;
+    cfg.usbPaDrive = DEFAULT_USB_PA_DRIVE;
     cfg.loraFrequency = DEFAULT_LORA_FREQ;
     strncpy(cfg.radioChip, DEFAULT_RADIO_CHIP, sizeof(cfg.radioChip));
     strncpy(cfg.loraTcxo, DEFAULT_LORA_TCXO, sizeof(cfg.loraTcxo));
@@ -235,6 +241,8 @@ static void configSetValue(TrackerConfig &cfg, const char *key, const char *val)
         cfg.fullDebug = (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0);
     } else if (strcasecmp(key, "usbTxInhibit") == 0) {
         cfg.usbTxInhibit = (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0);
+    } else if (strcasecmp(key, "usbPaDrive") == 0) {
+        cfg.usbPaDrive = constrain(atoi(val), -9, 22);
     } else if (strcasecmp(key, "loraFrequency") == 0) {
         cfg.loraFrequency = atof(val);
     } else if (strcasecmp(key, "radioChip") == 0) {
@@ -324,9 +332,11 @@ static const char *CONFIG_TEMPLATE =
     "bme680TempOffset=0\n"
     "\n"
     "# --- USB ---\n"
-    "# Stay off the air while a computer has the tracker enumerated;\n"
-    "# eject the drive to transmit. false for a car head unit.\n"
-    "usbTxInhibit=true\n"
+    "# Drive used while a computer has the tracker enumerated, -9..22.\n"
+    "# Rated drive stalls the PA ramp on USB power.\n"
+    "usbPaDrive=-9\n"
+    "# Or refuse to transmit at all while a computer is attached.\n"
+    "usbTxInhibit=false\n"
     "\n"
     "# --- Debug ---\n"
     "fullDebug=false\n";
@@ -374,9 +384,11 @@ static bool configCreateDefault() {
     f.println("i2cDevice=BME680");
     f.println("bme680TempOffset=0");
     f.println("");
-    f.println("# Stay off the air while a computer has the tracker enumerated;");
-    f.println("# eject the drive to transmit. false for a car head unit.");
-    f.println("usbTxInhibit=true");
+    f.println("# Drive used while a computer has the tracker enumerated, -9..22.");
+    f.println("# Rated drive stalls the PA ramp on USB power.");
+    f.println("usbPaDrive=-9");
+    f.println("# Or refuse to transmit at all while a computer is attached.");
+    f.println("usbTxInhibit=false");
     f.println("");
     f.println("fullDebug=false");
     f.close();

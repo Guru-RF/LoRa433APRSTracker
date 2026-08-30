@@ -23,28 +23,34 @@ is up and the CPU has stopped - not a reset and not a power failure.
 
 ## Root cause
 
-RadioLib waits for BUSY to fall after SetTx **with no timeout of its own**
-(`src/radio.cpp`). When the SX1262 is asked for its maximum +22 dBm PA
-configuration (`paDutyCycle=4, hpMax=7`) on this module, BUSY never falls and
-the driver spins forever. The chip reports no error - it simply stops
-answering.
+**Transmitting while USB-C is attached.** On the Powerpole alone the tracker
+transmits at full drive and works: an iGate 8 m away decodes it at RSSI
+-43 dBm, SNR 3.5. Unplug the Powerpole and transmit on USB-C and the PA ramp
+stalls.
 
-It is the *top of the drive range* that fails, not the current drawn getting
-there. Throttling by either available route avoids it:
+This is the failure the transmit inhibit exists to prevent. Every reproduction
+during the 2026-08-30 bench session was produced by ejecting the drive to get
+a serial console, which is what lifts the inhibit - so the whole session was
+run in the one configuration the firmware is written to refuse.
 
-| `paDrive` | `loraOcp` | result |
-|-----------|-----------|--------------------------------------------------|
-| 22        | 140       | hangs in `startTransmit`, LoRa LED stuck on      |
-| 22        | 60        | works - the die's OCP clamps it below +22 dBm    |
-| 14        | 140       | works - three metadata frames and beacons, stable |
+The mechanism is a stalled PA ramp, not a reset: RadioLib waits for BUSY to
+fall after SetTx **with no timeout of its own** (`src/radio.cpp`), so when the
+ramp cannot complete the driver spins forever and the chip reports no error.
 
-`loraOcp=60` is not a usable setting: the die needs ~118 mA to make +22 dBm,
-so clamping to 60 buys survival by throttling the transmitter below useful
-output. Nothing was heard on an iGate 8 m away.
+On USB the stall is drive-dependent, which is what made it look like a PA
+configuration problem for a while:
 
-**Working setting today: `paDrive=14`.** Note this contradicts commit bfe48bf,
-which set `paDrive=22` deliberately because that is what the module needs for
-its rated output. The board therefore cannot currently reach rated power.
+| `paDrive` | supply           | result                                    |
+|-----------|------------------|-------------------------------------------|
+| 22        | Powerpole        | **works** - iGate decodes at -43 dBm      |
+| 20        | Powerpole        | works                                     |
+| 14        | USB-C            | works - low enough draw to stay inside it |
+| 20        | USB-C            | stalls                                    |
+| 22        | USB-C            | stalls                                    |
+
+`loraOcp=60` also "works" on USB, for the same reason and no other: it clamps
+the die below the drive it was asked for. It is not a usable setting - nothing
+was heard on an iGate 8 m away with it.
 
 ## The firmware bug, now fixed
 
@@ -59,8 +65,9 @@ the stall; it makes it survivable.
 
 ## Ruled out - do not re-derive
 
-- **Supply, current, and voltage drop.** Measured by the board owner at
-  another location, from USB-C *and* from the Powerpole. Not a brownout. The
+- **A supply rail collapsing.** Measured by the board owner from USB-C *and*
+  from the Powerpole - no drop on either. Whatever USB-powered transmit does,
+  it is not a rail sagging where a meter can see it. The
   3V3 LDO arithmetic (XC6206P332MR, 200 mA, versus ~118 mA for the die at
   +22 dBm) looks alarming on paper and is *not* what is happening.
 - **TCXO / oscillator.** The MiniF27 datasheet block diagram shows a plain
@@ -82,17 +89,23 @@ the stall; it makes it survivable.
 - **The missing `-u _printf_float`.** Real, and fixed, but runtime-benign:
   varargs stay aligned, and config parsing uses `atof()`, never `scanf`.
 
-## Still open
+## Consequences for the firmware
 
-Why BUSY never falls at +22 dBm on this module, given the supply is sound.
-Worth trying next:
+The binary inhibit is the wrong response. Silence while a host is attached
+means the bench setup can never be tested against an iGate, which is why this
+took a whole evening to see. Scaling the drive instead - rated power on the
+Powerpole, reduced drive while a host is enumerated - keeps the tracker on the
+air in both cases and removes the need for the eject escape hatch entirely,
+along with the `watchdog_hw->scratch[2]` latch that implements it.
 
-1. `tools/chipprobe -e radiotest-tx`, which sends three frames at die drive
-   0, 10 and 22 dBm in one boot and prints the SX126x device-errors word after
-   each. That is the instrumented version of the sweep done here by hand.
-   Change `DEFAULT_CALLSIGN` before building or it transmits as ON9RFG.
-2. Bisect `paDrive` between 14 and 22 to find the exact threshold.
-3. Read `GetDeviceErrors` (0x17) after a transmit in `TrackerRadio::send()`
-   and report PA_RAMP / PLL_LOCK, so the firmware says why rather than hanging.
-4. Give the BUSY wait a bound so a stall degrades to `TX FAILED` instead of
-   relying on a watchdog reset.
+`paDrive=14` is the only USB value proven to survive. 17 is untested; 20 and
+22 both stall.
+
+Still worth doing:
+
+1. Read `GetDeviceErrors` (0x17) after a transmit in `TrackerRadio::send()`
+   and report PA_RAMP / PLL_LOCK, so a stall says why instead of hanging.
+2. Give the BUSY wait a bound so a stall degrades to `TX FAILED` rather than
+   depending on a watchdog reset.
+3. Note that the eject latch survives a watchdog reset, so a repeatedly
+   stalling transmit currently retries forever. Removing the latch fixes this.

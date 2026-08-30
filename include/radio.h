@@ -38,6 +38,13 @@ bool begin(const TrackerConfig &cfg, char *err, size_t errLen);
 // time-on-air budget expires), feeding the watchdog throughout.
 bool send(const uint8_t *data, size_t len);
 
+// Re-program the transmit drive between packets, clamped to what the
+// fitted chip can produce. On a module with its own amplifier this is
+// the drive into that amplifier; on a bare module it is the output
+// power. Cheap and idempotent - a value already in force is a no-op -
+// so callers may set it before every frame.
+bool setDrive(int8_t dbm);
+
 RadioChip   chip();
 const char *chipName();
 

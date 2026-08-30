@@ -66,10 +66,11 @@ makes `shouldBeacon()` true on every 50 ms pass and erases a flash sector each
 time. Suppress the *call* to `sendMetadata()`, never the transmission inside
 it, or `metadataForced` is consumed and receivers lose PARM/UNIT/EQNS.
 
-## Open: V2 board hangs at the first transmission
+## V2: transmitting on USB power
 
-See [docs/v2-beacon-crash.md](docs/v2-beacon-crash.md). `paDrive=14` is the
-working setting; `paDrive=22`, which the module wants for rated output, hangs
-the driver. Read the ruled-out list before proposing a cause - supply current,
-the oscillator, time on air and GP2 are all eliminated with evidence, most of
-them after being confidently asserted and then disproved.
+Resolved: **transmitting while USB-C is attached** stalls the PA ramp. On the
+Powerpole the tracker runs at rated drive and an iGate 8 m away decodes it at
+-43 dBm. See [docs/v2-beacon-crash.md](docs/v2-beacon-crash.md), which also
+records what was wrongly blamed first - supply current, the oscillator, time on
+air, GP2 - so nobody re-derives them. `paDrive=14` is the only value proven to
+survive on USB power.

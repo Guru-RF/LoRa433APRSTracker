@@ -86,6 +86,7 @@ static int8_t         appliedPwr = 0;
 static float          tcxoVolts  = 0.0f;
 static bool           spiStarted = false;
 static bool           modulePa   = false;   // module has its own amplifier
+static float          ocpMa      = LORA_OCP_SX126X_MA;   // as configured, for setDrive()
 static bool           useLdoReg  = false;   // die regulator: LDO vs DC-DC
 
 // The 16-byte version string at register 0x0320 is the only way to tell
@@ -480,7 +481,8 @@ bool TrackerRadio::begin(const TrackerConfig &cfg, char *err, size_t errLen) {
         //
         // Last, because setOutputPower() saves and restores whatever OCP
         // was in force when it ran.
-        sx126->setCurrentLimit((float)cfg.loraOcp);
+        ocpMa = (float)cfg.loraOcp;
+        sx126->setCurrentLimit(ocpMa);
 
         txDoneMask = RADIOLIB_SX126X_IRQ_TX_DONE;
     }
@@ -531,6 +533,34 @@ bool TrackerRadio::send(const uint8_t *data, size_t len) {
     phy->finishTransmit();
     watchdog_update();
     return done;
+}
+
+// Change the drive between packets.
+//
+// The clamping mirrors begin() exactly, so a value that was legal at
+// boot stays legal here. On the SX126x setOutputPower() saves and
+// restores whatever OCP was in force when it ran, which silently undoes
+// the configured current limit - so it is re-applied every time.
+bool TrackerRadio::setDrive(int8_t dbm) {
+    if (!phy) return false;
+
+    int8_t clipped;
+    if (activeChip == RADIO_CHIP_SX127X) {
+        clipped = (dbm >= 20) ? 20 : (int8_t)constrain(dbm, 2, 17);
+        if (clipped == appliedPwr) return true;
+        if (radioSx127x.setOutputPower(clipped) != RADIOLIB_ERR_NONE) return false;
+        radioSx127x.setCurrentLimit(LORA_OCP_SX127X_MA);
+    } else {
+        clipped = modulePa
+                    ? (int8_t)constrain(dbm, MINIF27_MIN_DRIVE, MINIF27_MAX_DRIVE)
+                    : (int8_t)constrain(dbm, -9, 22);
+        if (clipped == appliedPwr) return true;
+        if (sx126->setOutputPower(clipped) != RADIOLIB_ERR_NONE) return false;
+        sx126->setCurrentLimit(ocpMa);
+    }
+
+    appliedPwr = clipped;
+    return true;
 }
 
 // ============================================================
