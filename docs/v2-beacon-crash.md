@@ -37,7 +37,12 @@ The mechanism is a stalled PA ramp, not a reset: RadioLib waits for BUSY to
 fall after SetTx **with no timeout of its own** (`src/radio.cpp`), so when the
 ramp cannot complete the driver spins forever and the chip reports no error.
 
-On USB the stall is drive-dependent, which is what made it look like a PA
+Both operating points are now verified against an iGate 8 m away:
+`paDrive=22` on the Powerpole decodes at -42 dBm, and `usbPaDrive=8` with a
+computer attached decodes at -42..-46 dBm. There is no silent band on the
+Powerpole at rated drive; the cliff is a USB-power phenomenon only.
+
+On USB the behaviour is drive-dependent, which is what made it look like a PA
 configuration problem for a while:
 
 | `paDrive` | supply           | result                                    |
@@ -98,8 +103,15 @@ Powerpole, reduced drive while a host is enumerated - keeps the tracker on the
 air in both cases and removes the need for the eject escape hatch entirely,
 along with the `watchdog_hw->scratch[2]` latch that implements it.
 
-`paDrive=14` is the only USB value proven to survive. 17 is untested; 20 and
-22 both stall.
+Measured USB ceiling: **8**. Everything from -9 to 8 is decoded, with RSSI
+tracking drive about 1:1 (-9 -> -56 dBm, 0 -> -50, 5 -> -45, 8 -> -46).
+From 9 to 14 the tracker transmits cleanly and is never decoded - the
+dangerous band, because it looks exactly like a working tracker. 17 takes the
+USB link down and needs the cable physically pulled. usbPaDrive is clamped to
+8 in the parser so the silent band cannot be selected.
+
+Note RSSI saturates at this range: everything above drive 5 reads -42..-46 dBm
+regardless, so at 8 m only "decoded or not" is a useful signal, not strength.
 
 Still worth doing:
 
