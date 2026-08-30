@@ -31,6 +31,15 @@ extern FS FatFS;
 // SX1262's floor into a module amplifier and is still tens of dB
 // above what a nearby receiver needs. See src/main.cpp.
 #define DEFAULT_USB_PA_DRIVE  -9
+// Hard ceiling for usbPaDrive, not a preference. RadioLib selects the
+// SX1262's PA hardware config by power band, and only the lowest
+// (paDutyCycle 0x02 / hpMax 0x02, which is everything up to 14) will
+// ramp on USB power. Measured: 14 transmits, 17 takes the whole USB
+// link down and needs the cable physically pulled, 20 and 22 stall.
+// A value that hangs here hangs on every boot, and the config drive
+// may never stay mounted long enough to correct it - so the ceiling is
+// enforced rather than documented.
+#define USB_PA_DRIVE_MAX      14
 // Refuse to transmit at all while a computer is attached, rather than
 // dropping to usbPaDrive. For a port that cannot supply even the
 // floor drive.
@@ -242,7 +251,7 @@ static void configSetValue(TrackerConfig &cfg, const char *key, const char *val)
     } else if (strcasecmp(key, "usbTxInhibit") == 0) {
         cfg.usbTxInhibit = (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0);
     } else if (strcasecmp(key, "usbPaDrive") == 0) {
-        cfg.usbPaDrive = constrain(atoi(val), -9, 22);
+        cfg.usbPaDrive = constrain(atoi(val), -9, USB_PA_DRIVE_MAX);
     } else if (strcasecmp(key, "loraFrequency") == 0) {
         cfg.loraFrequency = atof(val);
     } else if (strcasecmp(key, "radioChip") == 0) {
@@ -332,8 +341,8 @@ static const char *CONFIG_TEMPLATE =
     "bme680TempOffset=0\n"
     "\n"
     "# --- USB ---\n"
-    "# Drive used while a computer has the tracker enumerated, -9..22.\n"
-    "# Rated drive stalls the PA ramp on USB power.\n"
+    "# Drive used while a computer has the tracker enumerated, -9..14.\n"
+    "# Anything higher will not ramp on USB power.\n"
     "usbPaDrive=-9\n"
     "# Or refuse to transmit at all while a computer is attached.\n"
     "usbTxInhibit=false\n"
@@ -384,8 +393,8 @@ static bool configCreateDefault() {
     f.println("i2cDevice=BME680");
     f.println("bme680TempOffset=0");
     f.println("");
-    f.println("# Drive used while a computer has the tracker enumerated, -9..22.");
-    f.println("# Rated drive stalls the PA ramp on USB power.");
+    f.println("# Drive used while a computer has the tracker enumerated, -9..14.");
+    f.println("# Anything higher will not ramp on USB power.");
     f.println("usbPaDrive=-9");
     f.println("# Or refuse to transmit at all while a computer is attached.");
     f.println("usbTxInhibit=false");

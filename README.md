@@ -65,7 +65,8 @@ After flashing, the device presents as a USB drive with a `config.txt` file. Edi
 - **paDrive** - chip dBm into a module PA, -9..22 (V2 only)
 - **gpsBaud** - `0` to detect, or pin it (`9600` / `115200`)
 - **usbPaDrive** - drive used while a computer has the tracker enumerated,
-  -9..22 (default `-9`)
+  -9..14 (default `-9`). Higher will not ramp on USB power, so the firmware
+  clamps it
 - **usbTxInhibit** - refuse to transmit at all while a computer is attached,
   instead of dropping to `usbPaDrive` (`true`/`false`, default `false`)
 
