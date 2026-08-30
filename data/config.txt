@@ -58,8 +58,8 @@ i2cDevice=BME680
 bme680TempOffset=0
 
 # --- USB ---
-# Drive used while a computer has the tracker enumerated, -9..14.
-# Anything higher will not ramp on USB power.
+# Drive used while a computer has the tracker enumerated, -9..8.
+# Higher transmits but is not decoded, so the firmware clamps it.
 usbPaDrive=-9
 # Or refuse to transmit at all while a computer is attached.
 usbTxInhibit=false

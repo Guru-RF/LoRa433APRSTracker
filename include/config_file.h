@@ -31,15 +31,18 @@ extern FS FatFS;
 // SX1262's floor into a module amplifier and is still tens of dB
 // above what a nearby receiver needs. See src/main.cpp.
 #define DEFAULT_USB_PA_DRIVE  -9
-// Hard ceiling for usbPaDrive, not a preference. RadioLib selects the
-// SX1262's PA hardware config by power band, and only the lowest
-// (paDutyCycle 0x02 / hpMax 0x02, which is everything up to 14) will
-// ramp on USB power. Measured: 14 transmits, 17 takes the whole USB
-// link down and needs the cable physically pulled, 20 and 22 stall.
-// A value that hangs here hangs on every boot, and the config drive
-// may never stay mounted long enough to correct it - so the ceiling is
-// enforced rather than documented.
-#define USB_PA_DRIVE_MAX      14
+// Hard ceiling for usbPaDrive, not a preference, and set by what is
+// actually *received* rather than by what transmits without hanging.
+// Measured against an iGate 8 m away: 8 decodes at -46 dBm, 7 at -43,
+// 5 at -45, 0 at -50, -9 at -56 - RSSI tracking drive about 1:1. From
+// 9 upward the tracker transmits cleanly, the console prints TX and
+// the LED blinks, and nothing is ever decoded; 17 takes the whole USB
+// link down and needs the cable physically pulled.
+//
+// So the dangerous band is 9..14: it looks like it is working and is
+// not. That is the failure mode that cost an evening of debugging, and
+// it is worth more than the 6 dB it would buy.
+#define USB_PA_DRIVE_MAX      8
 // Refuse to transmit at all while a computer is attached, rather than
 // dropping to usbPaDrive. For a port that cannot supply even the
 // floor drive.
@@ -341,8 +344,8 @@ static const char *CONFIG_TEMPLATE =
     "bme680TempOffset=0\n"
     "\n"
     "# --- USB ---\n"
-    "# Drive used while a computer has the tracker enumerated, -9..14.\n"
-    "# Anything higher will not ramp on USB power.\n"
+    "# Drive used while a computer has the tracker enumerated, -9..8.\n"
+    "# Higher transmits but is not decoded, so the firmware clamps it.\n"
     "usbPaDrive=-9\n"
     "# Or refuse to transmit at all while a computer is attached.\n"
     "usbTxInhibit=false\n"
@@ -393,8 +396,8 @@ static bool configCreateDefault() {
     f.println("i2cDevice=BME680");
     f.println("bme680TempOffset=0");
     f.println("");
-    f.println("# Drive used while a computer has the tracker enumerated, -9..14.");
-    f.println("# Anything higher will not ramp on USB power.");
+    f.println("# Drive used while a computer has the tracker enumerated, -9..8.");
+    f.println("# Higher transmits but is not decoded, so the firmware clamps it.");
     f.println("usbPaDrive=-9");
     f.println("# Or refuse to transmit at all while a computer is attached.");
     f.println("usbTxInhibit=false");
