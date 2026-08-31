@@ -1067,18 +1067,27 @@ void loop() {
         char ts[8];
         aprsTimestamp(ts, 'z', gps.date.day(), gps.time.hour(), gps.time.minute(), gps.time.second());
 
-        // Altitude rides in the compressed position's cs bytes whenever
-        // there is no course or speed to put there - three bytes a
-        // stationary report was wasting, against nine for a /A= in the
-        // comment. Moving, course and speed win the field and /A= is used
-        // instead if it is wanted at all.
+        // Altitude rides in the compressed position's cs bytes while
+        // parked - three bytes the report was wasting, against nine for a
+        // /A= in the comment. Moving, course and speed earn the field and
+        // /A= carries the altitude instead.
+        //
+        // The test is speed, not whether a course happens to be
+        // representable. A parked GPS still reports a heading, so keying
+        // on that encoded "course 10 degrees, speed 0" into cs and then
+        // paid for /A= anyway - misfiring in exactly the case the
+        // optimisation exists for.
         char aprsPos[20];
         float spdForAprs = speedKmh >= 0 ? speedKmh : -1;
         float hdgForAprs = heading >= 0 ? heading : -1;
-        bool  movingCs   = (spdForAprs >= 0 && hdgForAprs > 0 && hdgForAprs <= 360);
+        bool  parked     = jitter.isStationary() ||
+                           (spdForAprs >= 0 && spdForAprs < cfg.sbStationarySpeed);
         float altFt      = (altM >= 0 && cfg.aprsAltitude) ? altM * 3.2808399f : -1.0f;
-        aprsPosition(aprsPos, lat, lon, spdForAprs, hdgForAprs, cfg.symbol,
-                     movingCs ? -1.0f : altFt);
+        aprsPosition(aprsPos, lat, lon,
+                     parked ? -1.0f : spdForAprs,
+                     parked ? -1.0f : hdgForAprs,
+                     cfg.symbol,
+                     parked ? altFt : -1.0f);
 
         // Sequence
         sequence = (sequence + 1) % 8192;
@@ -1151,8 +1160,8 @@ void loop() {
 
         cpos += snprintf(comment + cpos, sizeof(comment) - cpos, "|");
 
-        // Only when the cs field could not take it - i.e. while moving.
-        if (altM >= 0 && cfg.aprsAltitude && movingCs) {
+        // Only while moving - parked, the cs field already carries it.
+        if (altM >= 0 && cfg.aprsAltitude && !parked) {
             int feet = (int)(altM * 3.2808399f);
             cpos += snprintf(comment + cpos, sizeof(comment) - cpos, "/A=%06d", feet);
         }
