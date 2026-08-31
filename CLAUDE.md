@@ -66,12 +66,18 @@ frame. Detection is `tud_mounted()` (USB SET_CONFIGURATION), not the
 mass-storage mount - there is no dependable mount signal, as FatFSUSB's
 `onPlug` only fires on a SCSI START STOP UNIT load that no OS sends.
 
-Ejecting the drive latches `"EJCT"` into `watchdog_hw->scratch[2]` and reboots;
-the next boot reports no medium so nothing can re-mount it, and transmission is
-enabled for the rest of that power session. Scratch survives a soft reset and
-is cleared by power-on, which is what makes that work. `scratch[2]` is the only
-free word - `[0..1]` carry `reset_usb_boot()` arguments and `[4..7]` are the
-SDK's reboot vector and watchdog magic.
+Rather than refusing to transmit, the drive is scaled: `usbPaDrive` while a
+host is enumerated, rated `paDrive` otherwise, chosen per frame so it follows
+the cable with no reboot. `usbTxInhibit=true` restores full silence for a port
+that cannot supply even the floor drive.
+
+That reduced-drive state announces itself - a console line every 60 s and a
+power-LED wink every 5 s - because a car head unit enumerates USB mass storage
+and would otherwise hold a tracker at -9 dBm for a whole journey with
+well-formed frames that nothing decodes.
+
+The eject latch in `watchdog_hw->scratch[2]` that an earlier design used is
+gone; ejecting now only reboots to apply the config, as the README says.
 
 The gate in `loop()` must stay **above** `sb.shouldBeacon()`. Suppressing
 between that call and `sb.updateAfterBeacon()` leaves `_lastLat` at 999, which
@@ -96,8 +102,8 @@ non-obvious facts, both from primary sources:
   moving, course/speed wins.
 - **aprs.fi caches the comment.** Its author: the comment "will be forgotten
   if you still transmit packets without a comment after 7 days". So
-  `commentInterval` is safe on aprs.fi - but it defaults to every beacon
-  because other consumers may not cache.
+  `commentInterval` is safe on aprs.fi. It is seconds, not a beacon count, and
+  defaults to 1800.
 - Compressed reports allow **40 comment characters**, not the 43 of an
   uncompressed one.
 
@@ -140,5 +146,10 @@ Resolved: **transmitting while USB-C is attached** stalls the PA ramp. On the
 Powerpole the tracker runs at rated drive and an iGate 8 m away decodes it at
 -43 dBm. See [docs/v2-beacon-crash.md](docs/v2-beacon-crash.md), which also
 records what was wrongly blamed first - supply current, the oscillator, time on
-air, GP2 - so nobody re-derives them. `paDrive=14` is the only value proven to
-survive on USB power.
+air, GP2 - so nobody re-derives them.
+
+`usbPaDrive` is clamped to **8**, set by what an iGate actually decodes rather
+than by what transmits without hanging: 9..14 transmit cleanly and are never
+heard, and 17 takes the USB link down. An earlier note here recommended
+`paDrive=14`, which is both the wrong key - `currentDrive()` ignores `paDrive`
+entirely while a host is enumerated - and a value in the silent band.

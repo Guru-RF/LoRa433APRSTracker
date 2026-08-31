@@ -10,6 +10,7 @@
 #include <FatFS.h>
 #include <hardware/watchdog.h>
 
+#include "pins.h"
 #include "radio.h"
 
 extern "C" {
@@ -99,7 +100,12 @@ bool MeshCore::begin(char *err, size_t errLen) {
     size_t n = f.write((const uint8_t *)&identity, sizeof(identity));
     f.close();
     if (n != sizeof(identity)) {
-        snprintf(err, errLen, "short write creating %s", IDENTITY_PATH);
+        // Remove the stub rather than leaving it to be read back as a
+        // corrupt file on every later boot - which would report an operator
+        // error for a file this code wrote five lines ago and knows is bad,
+        // and would disable MeshCore permanently.
+        FatFS.remove(IDENTITY_PATH);
+        snprintf(err, errLen, "short write creating %s - removed", IDENTITY_PATH);
         return false;
     }
 
@@ -174,10 +180,30 @@ bool MeshCore::sendAdvert(const TrackerConfig &cfg, float lat, float lon,
     memcpy(frame + 2, payload, payLen);
 
     // ---- retune, transmit, and always come back to APRS ----
+    // Whatever happens, hand the radio back on the APRS profile. Nothing on
+    // the APRS path re-asserts it, so a mesh retune that bailed early and
+    // returned without restoring would leave every later beacon, alert and
+    // metadata frame transmitting on 434.890 - unheard by the iGate, and a
+    // multi-second SF12 blast across the MeshCore channel - until the
+    // tracker was power-cycled.
     char err[64];
-    if (!TrackerRadio::setMode(RADIO_MODE_MESH, cfg, err, sizeof(err))) return false;
-    TrackerRadio::setDrive(drive);
-    bool ok = TrackerRadio::send(frame, 2 + payLen);
-    TrackerRadio::setMode(RADIO_MODE_APRS, cfg, err, sizeof(err));
+    bool ok = false;
+    if (TrackerRadio::setMode(RADIO_MODE_MESH, cfg, err, sizeof(err))) {
+        TrackerRadio::setDrive(drive);
+        // Bracket the transmission with the amplifier enable exactly as
+        // loraSendText() does. GP2 is unconnected on V2 so this changes
+        // nothing there, but on a V1 board it gates the 13.8 V amplifier
+        // and an advert would otherwise go out unamplified.
+        bool needPa = cfg.hasPa || TrackerRadio::hasModulePa();
+        if (needPa) { digitalWrite(PIN_PA, HIGH); delay(250); watchdog_update(); }
+        ok = TrackerRadio::send(frame, 2 + payLen);
+        if (needPa) { delay(100); digitalWrite(PIN_PA, LOW); }
+    }
+    if (!TrackerRadio::setMode(RADIO_MODE_APRS, cfg, err, sizeof(err))) {
+        // The radio is now on an unknown profile and APRS is about to use
+        // it. Say so loudly; setMode has left its cache invalid, so the
+        // next attempt reprograms from scratch rather than trusting it.
+        Serial.printf("\x1b[1;5;31mRADIO STUCK OFF-PROFILE: %s\x1b[0m\r\n", err);
+    }
     return ok;
 }

@@ -25,7 +25,10 @@
 // rate and preamble all change.
 enum RadioMode {
     RADIO_MODE_APRS = 0,    // 433.775, BW125, SF12, CR4:5, preamble 8
-    RADIO_MODE_MESH         // 434.890, BW62.5, SF8,  CR4:8, preamble 16
+    RADIO_MODE_MESH,        // 434.890, BW62.5, SF8,  CR4:8, preamble 16
+    RADIO_MODE_UNKNOWN      // a retune failed partway; the chip's state is
+                            // not known and the next setMode() must
+                            // reprogram everything rather than short-circuit
 };
 
 enum RadioChip {

@@ -373,9 +373,20 @@ static void configSetValue(TrackerConfig &cfg, const char *key, const char *val)
         // and the occupied bandwidth reaches ~31 kHz above the carrier.
         cfg.meshFrequency = constrain((float)atof(val), 430.0f, 434.960f);
     } else if (strcasecmp(key, "meshBandwidth") == 0) {
-        cfg.meshBandwidth = (float)atof(val);
+        // The one radio key without validation was the one reachable way to
+        // fail a retune partway and strand the radio off-channel. Only the
+        // bandwidths RadioLib accepts are allowed through.
+        float bw = (float)atof(val);
+        const float ok[] = { 7.8f, 10.4f, 15.6f, 20.8f, 31.25f,
+                             41.7f, 62.5f, 125.0f, 250.0f, 500.0f };
+        cfg.meshBandwidth = DEFAULT_MESH_BW;
+        for (unsigned i = 0; i < sizeof(ok) / sizeof(ok[0]); i++) {
+            if (fabsf(bw - ok[i]) < 0.01f) { cfg.meshBandwidth = bw; break; }
+        }
     } else if (strcasecmp(key, "meshSf") == 0) {
-        cfg.meshSf = constrain(atoi(val), 5, 12);
+        // 6, not 5: RadioLib's SX1278 switch starts at 6, so SF5 would fail
+        // the retune on a V1 board even though an SX126x would take it.
+        cfg.meshSf = constrain(atoi(val), 6, 12);
     } else if (strcasecmp(key, "meshCr") == 0) {
         cfg.meshCr = constrain(atoi(val), 5, 8);
     } else if (strcasecmp(key, "meshPreamble") == 0) {

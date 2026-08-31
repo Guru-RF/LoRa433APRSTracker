@@ -242,26 +242,29 @@ static void usbInhibitUpdate() {
 
     usbInhibit = cfg.usbTxInhibit && usbHost;
 
+    (void)wasInhibit;
     if (usbHost && !wasHost) {
         char buf[96];
         snprintf(buf, sizeof(buf), "USB host connected - drive reduced to %d dBm",
                  cfg.usbPaDrive);
         yellow(cfg.usbTxInhibit ? "USB host connected - transmit inhibited" : buf);
-    } else if (!usbHost && wasHost) {
-        green("USB host disconnected - rated drive restored");
-    }
-
-    if (usbInhibit && !wasInhibit) {
         usbLastInhibitLog = millis();
         usbBlinkStart = millis();
-    } else if (!usbInhibit && wasInhibit) {
+    } else if (!usbHost && wasHost) {
+        green("USB host disconnected - rated drive restored");
         digitalWrite(PIN_LED_PWR, HIGH);     // end any wink mid-cycle
     }
 }
 
-// Say why the tracker is quiet, for as long as it is quiet. Only
-// reachable with usbTxInhibit=true; the default now transmits at
-// reduced drive and has nothing to explain. Nobody watches a serial
+// Say what a host is doing to the transmitter, for as long as it does it.
+//
+// This covers BOTH states, and reduced drive is the dangerous one. A car
+// head unit enumerates USB mass storage, so it holds the tracker at
+// usbPaDrive - as little as -9 dBm - for a whole journey while the LoRa
+// LED blinks normally and every frame is well formed. Nothing decodes
+// them. That is the silent-transmit failure this firmware has already
+// lost an evening to, and it deserves a standing indication rather than
+// one line at boot. Nobody watches a serial
 // console in a car, so the power LED - otherwise steady - winks
 // briefly every 5 s alongside the console line.
 //
@@ -269,12 +272,19 @@ static void usbInhibitUpdate() {
 // keyed", and blinking it to report the opposite reads as normal
 // beaconing: it cost a bench session chasing an iGate that was
 // receiving nothing because nothing was ever sent.
-static void usbInhibitHold() {
+static void usbHostHold() {
     unsigned long now = millis();
 
     if ((now - usbLastInhibitLog) >= USB_INHIBIT_LOG_MS) {
         usbLastInhibitLog = now;
-        yellow("TX inhibited - USB host still connected");
+        if (usbInhibit) {
+            yellow("TX inhibited - USB host still connected");
+        } else {
+            char buf[88];
+            snprintf(buf, sizeof(buf),
+                     "USB host still connected - drive held at %d dBm", cfg.usbPaDrive);
+            yellow(buf);
+        }
     }
 
     unsigned long phase = now - usbBlinkStart;
@@ -926,9 +936,10 @@ void loop() {
     // radio. GPS, the LEDs and the console keep running while it
     // holds - only the transmitter stops.
     usbInhibitUpdate();
-    if (txInhibited()) {
-        usbInhibitHold();
-    } else if (metadataForced) {
+    if (usbHostPresent()) {
+        usbHostHold();
+    }
+    if (!txInhibited() && metadataForced) {
         // Held back at boot because a host was connected. Send it as
         // soon as the inhibit lifts, without waiting for a GPS fix, so
         // a bench PA test still gets its metadata.

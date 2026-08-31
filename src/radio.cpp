@@ -550,6 +550,14 @@ bool TrackerRadio::setMode(RadioMode m, const TrackerConfig &cfg,
     }
     if (m == activeMode) return true;
 
+    // From here the chip is being reprogrammed step by step and any failure
+    // leaves it half-configured. Mark the cached mode unknown *first*, so
+    // the short-circuit above can never report success for a chip that is
+    // not actually in that mode - which would otherwise strand the radio on
+    // the wrong frequency until a power cycle, transmitting every APRS
+    // beacon into the MeshCore passband.
+    activeMode = RADIO_MODE_UNKNOWN;
+
     const bool mesh = (m == RADIO_MODE_MESH);
     const float    freq      = mesh ? cfg.meshFrequency : cfg.loraFrequency;
     const float    bw        = mesh ? cfg.meshBandwidth : LORA_BW_KHZ;
@@ -575,7 +583,7 @@ bool TrackerRadio::setMode(RadioMode m, const TrackerConfig &cfg,
     }
     if (state != RADIOLIB_ERR_NONE) {
         snprintf(err, errLen, "%s retune failed (%d)", mesh ? "mesh" : "APRS", state);
-        return false;
+        return false;   // activeMode stays UNKNOWN - the next call reprograms
     }
 
     // Low data rate optimisation is mandatory above a 16 ms symbol and wrong

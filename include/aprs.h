@@ -85,7 +85,12 @@ static int aprsPosition(char *buf, float lat, float lon,
         if (speedNum > 89) speedNum = 89;
         buf[pos++] = (char)(speedNum + 33);
         buf[pos++] = 'A';
-    } else if (alt_ft > 1.0f) {
+    } else if (alt_ft > 0.0f) {
+        // > 0 rather than > 1: a coastal tracker sitting at 0.0-0.3 m would
+        // otherwise get neither the cs bytes nor a /A=, losing altitude
+        // entirely in the one band where it is most likely to be. The
+        // clamp below maps it to cs=0, and this still dodges logf(0).
+
         // Altitude in the cs bytes - APRS 1.0.1 chapter 9, page 40: with the
         // T byte's NMEA-source bits set to GGA (bits 4,3 = 10), cs carries
         // altitude = 1.002^cs feet.
