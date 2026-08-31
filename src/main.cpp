@@ -145,11 +145,27 @@ static void buildMetadata() {
 // Voltage Reading
 // ============================================================
 
+// The 13.8 V input is not measured through a plain divider. D5 (PDZ10B) is
+// a 10 V zener in series, and R18/R24 (200/300) then scale by 0.6 - so the
+// front end is a level shifter mapping 10.0..15.5 V onto the full ADC
+// range, which is the useful span of a 12 V lead-acid battery and a good
+// deal more resolution than a divider would give.
+//
+//     ADC = (Vin - 10) * 0.6      ->      Vin = ADC / 0.6 + 10
+//
+// The previous formula was `ADC + 12.0`: it dropped the 0.6 and used the
+// wrong offset, so the error grew as the battery discharged - 13.8 V read
+// as 14.3, 12.0 V as 13.2, and a genuinely flat 11.0 V as a healthy-looking
+// 12.6. triggerVoltageLevel=1200 could therefore only fire at an actual
+// 10.0 V, which is well past the point of doing the battery harm.
+static const float ADC_ZENER_V   = 10.0f;   // D5 PDZ10B
+static const float ADC_DIVIDER   = 0.6f;    // R24 / (R18 + R24)
+
 static float getVoltage() {
     int pin = cfg.hasPa ? PIN_ADC_PA : PIN_ADC_NOPA;
     int raw = analogRead(pin);
     if (cfg.hasPa) {
-        return ((raw * 3.3f) / 65536.0f) + 10.6f + 1.4f;
+        return ((raw * 3.3f) / 65536.0f) / ADC_DIVIDER + ADC_ZENER_V;
     }
     return ((raw * 3.3f) / 65536.0f) * 2.0f;
 }
@@ -855,6 +871,16 @@ void setup() {
                  "MeshCore: %.3f MHz BW%.1f SF%d CR4:%d, %s advert every %ds",
                  cfg.meshFrequency, cfg.meshBandwidth, cfg.meshSf, cfg.meshCr,
                  cfg.meshRoute, cfg.meshInterval);
+        yellow(cfgMsg);
+    }
+
+    if (cfg.fullDebug && cfg.voltage) {
+        // Raw counts alongside the volts, so one boot with a meter on the
+        // Powerpole confirms or corrects ADC_ZENER_V / ADC_DIVIDER instead
+        // of anyone having to infer them from a beacon's telemetry.
+        int rawAdc = analogRead(cfg.hasPa ? PIN_ADC_PA : PIN_ADC_NOPA);
+        snprintf(cfgMsg, sizeof(cfgMsg), "ADC raw=%d -> %.2f V (zener %.1f, div %.2f)",
+                 rawAdc, getVoltage(), ADC_ZENER_V, ADC_DIVIDER);
         yellow(cfgMsg);
     }
 
