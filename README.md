@@ -114,9 +114,10 @@ parked, and decays about **0.105 V/day**.
 - **battChargeVoltage** - default `1300` (13.00 V). Sits between parked-max and
   alternator-running, so it is an unambiguous "the engine is on".
 - **battPaDrive** - drive while the battery is unsupported, default `10`
-- **battStartDelay** - seconds after boot before protection may act, default
-  `10`. This is for a tracker wired to switched/ignition power, which boots
-  while the engine is cranking so its first readings are of the starter motor.
+- **battStartDelay** - seconds after boot before the tracker transmits at all,
+  default `10`. This is for a tracker wired to switched/ignition power, which
+  boots while the engine is cranking - the boot telemetry burst would otherwise
+  land about six seconds in, on the least stable part of the rail.
   Set `0` for an **electric car** - no starter motor, nothing to ride out.
 - **battStepVolts** / **battSettle** - stay off the air while the supply is
   *moving*, defaults `30` (0.30 V between one-second samples) and `5` seconds.

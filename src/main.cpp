@@ -283,6 +283,16 @@ static bool railSettling() {
     return railSettledAt && (long)(millis() - railSettledAt) < 0;
 }
 
+// Nothing transmits during the start delay either, which is the whole
+// point of it. On switched/ignition power the tracker boots while the
+// engine is cranking, and the boot telemetry burst lands about six seconds
+// in - squarely on the least stable part of the rail. Deferring the
+// battery sampling alone would have left the transmitter doing exactly the
+// thing the delay exists to prevent.
+static bool startupHold() {
+    return millis() < (unsigned long)cfg.battStartDelay * 1000UL;
+}
+
 static void battUpdate() {
     if (!cfg.voltage) { battLow = false; return; }
 
@@ -1102,6 +1112,13 @@ void setup() {
     usbInhibitUpdate();
     if (txInhibited()) {
         yellow("Telemetry metadata held while a USB host is connected");
+    } else if (startupHold()) {
+        // Left for loop() to send once the start delay expires, by the same
+        // metadataForced path the USB hold uses.
+        char buf[80];
+        snprintf(buf, sizeof(buf), "Telemetry metadata held %ds for the supply to settle",
+                 cfg.battStartDelay);
+        yellow(buf);
     } else {
         sendMetadata();
     }
@@ -1131,7 +1148,7 @@ void loop() {
     if (usbHostPresent()) {
         usbHostHold();
     }
-    if (!txInhibited() && metadataForced) {
+    if (!txInhibited() && !startupHold() && !railSettling() && metadataForced) {
         // Held back at boot because a host was connected. Send it as
         // soon as the inhibit lifts, without waiting for a GPS fix, so
         // a bench PA test still gets its metadata.
@@ -1204,7 +1221,7 @@ void loop() {
     //
     // jitter.stabilize() above keeps running on purpose - it is the
     // position filter and its anchor needs continuous GPS.
-    if (txInhibited() || railSettling()) {
+    if (txInhibited() || railSettling() || startupHold()) {
         delay(50);
         return;
     }
