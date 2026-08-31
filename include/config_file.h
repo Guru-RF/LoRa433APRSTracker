@@ -76,6 +76,15 @@ extern FS FatFS;
 // 0 disables it, which is the right setting for an EV: no starter motor,
 // no crank dip, and the 12 V DC-DC comes up immediately.
 #define DEFAULT_BATT_START_DELAY 10
+// A rail that is moving is a rail not to key a transmitter into. Cranking
+// is a dip AND a rise - the starter pulls the battery down, then the
+// alternator comes up - and both edges are worth staying off the air for.
+// Detected as a step between one-second samples, in hundredths of a volt,
+// which is why this is separate from the level thresholds above: a level
+// says how full the battery is, a step says the rail is not settled.
+// 0 disables it.
+#define DEFAULT_BATT_STEP_V      30     // V*100 between samples = unstable
+#define DEFAULT_BATT_SETTLE      5      // seconds off the air afterwards
 
 // --- Parked ---
 // Stationary this long and the beacon rate drops to sbParkedRate. 0 = off.
@@ -220,6 +229,8 @@ struct TrackerConfig {
     int    battChargeVoltage;
     int    battPaDrive;
     int    battStartDelay;
+    int    battStepVolts;
+    int    battSettle;
     int    sbParkedAfter;
     int    sbParkedRate;
 
@@ -289,6 +300,8 @@ static void configSetDefaults(TrackerConfig &cfg) {
     cfg.battChargeVoltage = DEFAULT_BATT_CHARGE_V;
     cfg.battPaDrive = DEFAULT_BATT_PA_DRIVE;
     cfg.battStartDelay = DEFAULT_BATT_START_DELAY;
+    cfg.battStepVolts = DEFAULT_BATT_STEP_V;
+    cfg.battSettle = DEFAULT_BATT_SETTLE;
     cfg.sbParkedAfter = DEFAULT_SB_PARKED_AFTER;
     cfg.sbParkedRate = DEFAULT_SB_PARKED_RATE;
 
@@ -414,6 +427,10 @@ static void configSetValue(TrackerConfig &cfg, const char *key, const char *val)
         cfg.battPaDrive = constrain(atoi(val), -9, 22);
     } else if (strcasecmp(key, "battStartDelay") == 0) {
         cfg.battStartDelay = constrain(atoi(val), 0, 600);
+    } else if (strcasecmp(key, "battStepVolts") == 0) {
+        cfg.battStepVolts = constrain(atoi(val), 0, 300);
+    } else if (strcasecmp(key, "battSettle") == 0) {
+        cfg.battSettle = constrain(atoi(val), 0, 60);
     } else if (strcasecmp(key, "sbParkedAfter") == 0) {
         cfg.sbParkedAfter = constrain(atoi(val), 0, 86400);
     } else if (strcasecmp(key, "sbParkedRate") == 0) {
@@ -555,6 +572,9 @@ static const char *CONFIG_TEMPLATE =
     "battPaDrive=10\n"
     "# 0 for an EV - no starter motor, so nothing to ride out\n"
     "battStartDelay=10\n"
+    "# hold off transmitting while the rail is moving (crank dip and rise)\n"
+    "battStepVolts=30\n"
+    "battSettle=5\n"
     "\n"
     "# --- Parked ---\n"
     "# Stationary this long (s) and the beacon rate drops. 0 = off.\n"
@@ -641,6 +661,9 @@ static bool configCreateDefault() {
     f.println("battPaDrive=10");
     f.println("# 0 for an EV - no starter motor, so nothing to ride out");
     f.println("battStartDelay=10");
+    f.println("# hold off transmitting while the rail is moving (crank dip and rise)");
+    f.println("battStepVolts=30");
+    f.println("battSettle=5");
     f.println("");
     f.println("# --- Parked ---");
     f.println("# Stationary this long (s) and the beacon rate drops. 0 = off.");

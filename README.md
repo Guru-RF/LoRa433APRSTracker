@@ -114,6 +114,16 @@ parked, and decays about **0.105 V/day**.
 - **battChargeVoltage** - default `1300` (13.00 V). Sits between parked-max and
   alternator-running, so it is an unambiguous "the engine is on".
 - **battPaDrive** - drive while the battery is unsupported, default `10`
+- **battStartDelay** - seconds after boot before protection may act, default
+  `10`. This is for a tracker wired to switched/ignition power, which boots
+  while the engine is cranking so its first readings are of the starter motor.
+  Set `0` for an **electric car** - no starter motor, nothing to ride out.
+- **battStepVolts** / **battSettle** - stay off the air while the supply is
+  *moving*, defaults `30` (0.30 V between one-second samples) and `5` seconds.
+  Cranking is a dip **and** a rise - the starter pulls the battery down, then
+  the alternator comes up - and keying a few hundred milliamps into either
+  edge is the worst moment to do it. A level says how full the battery is; a
+  step says the rail is not settled. `battStepVolts=0` disables it.
 
 It **arms itself**: nothing happens until the tracker has once seen a charging
 voltage, which proves a battery and alternator are actually present. A tracker

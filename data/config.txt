@@ -73,6 +73,10 @@ battChargeVoltage=1300
 battPaDrive=10
 # 0 for an EV - no starter motor, so no crank dip to ride out
 battStartDelay=10
+# Cranking is a dip AND a rise; stay off the air while the rail moves.
+# Step between 1s samples (V*100) and seconds to wait afterwards. 0 = off.
+battStepVolts=30
+battSettle=5
 
 # --- Parked ---
 # Stationary this long (seconds) and the beacon rate drops. 0 = off.

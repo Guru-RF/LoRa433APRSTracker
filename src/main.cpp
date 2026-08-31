@@ -259,6 +259,7 @@ static bool txInhibited() {
 // crank dip of a second or two can only ever spoil one of them.
 // ============================================================
 
+static const unsigned long BATT_FAST_MS     = 1000;
 static const unsigned long BATT_SAMPLE_MS   = 30000;
 static const unsigned long BATT_TX_QUIET_MS = 5000;
 static const uint8_t       BATT_LOW_SAMPLES = 2;
@@ -268,19 +269,56 @@ static bool          battLow = false;
 static unsigned long battLastSample = 0;
 static bool          battSampled = false;
 static uint8_t       battLowStreak = 0;
+static unsigned long battFastSample = 0;
+static int           battPrevV = 0;
+static unsigned long railSettledAt = 0;   // transmissions held off until this
 static unsigned long lastTxEnd = 0;
 
+// True while the supply is still settling after a step - cranking, a big
+// load switching, anything that moves the rail. Nothing goes on the air
+// then: the amplifier wants a few hundred milliamps and a rail that is
+// already moving is the worst moment to ask for it. Cranking is a dip AND
+// a rise, so the test is on the size of the step, not its direction.
+static bool railSettling() {
+    return railSettledAt && (long)(millis() - railSettledAt) < 0;
+}
+
 static void battUpdate() {
-    if (!cfg.battProtect || !cfg.voltage) { battLow = false; return; }
+    if (!cfg.voltage) { battLow = false; return; }
 
     unsigned long now = millis();
     if (now < (unsigned long)cfg.battStartDelay * 1000UL) return;   // riding out the crank
+    if (lastTxEnd && (now - lastTxEnd) < BATT_TX_QUIET_MS) return;  // rail still recovering
+    if (battFastSample && (now - battFastSample) < BATT_FAST_MS) return;
+    battFastSample = now;
+
+    int vx100 = (int)(getVoltage() * 100 + 0.5f);
+
+    // Step detection runs on the fast samples: a level says how full the
+    // battery is, a step says the rail is not settled, and they are
+    // different questions asked at different rates.
+    if (cfg.battStepVolts > 0 && battPrevV > 0) {
+        int step = vx100 - battPrevV;
+        if (step < 0) step = -step;
+        if (step >= cfg.battStepVolts) {
+            bool wasSettling = railSettling();
+            railSettledAt = now + (unsigned long)cfg.battSettle * 1000UL;
+            if (!wasSettling) {
+                char buf[96];
+                snprintf(buf, sizeof(buf),
+                         "Supply moved %.2fV to %.2fV - off the air for %ds",
+                         battPrevV / 100.0f, vx100 / 100.0f, cfg.battSettle);
+                yellow(buf);
+            }
+        }
+    }
+    battPrevV = vx100;
+
+    if (!cfg.battProtect) { battLow = false; return; }
     if (battSampled && (now - battLastSample) < BATT_SAMPLE_MS) return;
-    if (lastTxEnd && (now - lastTxEnd) < BATT_TX_QUIET_MS) return;   // rail still recovering
     battLastSample = now;
     battSampled = true;
 
-    int vx100 = (int)(getVoltage() * 100 + 0.5f);
     bool was = battLow;
 
     if (vx100 >= cfg.battChargeVoltage) {
@@ -1166,7 +1204,7 @@ void loop() {
     //
     // jitter.stabilize() above keeps running on purpose - it is the
     // position filter and its anchor needs continuous GPS.
-    if (txInhibited()) {
+    if (txInhibited() || railSettling()) {
         delay(50);
         return;
     }
