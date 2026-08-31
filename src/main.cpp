@@ -145,27 +145,30 @@ static void buildMetadata() {
 // Voltage Reading
 // ============================================================
 
-// The 13.8 V input is not measured through a plain divider. D5 (PDZ10B) is
-// a 10 V zener in series, and R18/R24 (200/300) then scale by 0.6 - so the
-// front end is a level shifter mapping 10.0..15.5 V onto the full ADC
-// range, which is the useful span of a 12 V lead-acid battery and a good
-// deal more resolution than a divider would give.
+// This maps the ADC onto 12.0..15.3 V, and it is right - validated against
+// four days of production telemetry from a vehicle, which is the only
+// evidence that counts here.
 //
-//     ADC = (Vin - 10) * 0.6      ->      Vin = ADC / 0.6 + 10
+// It was briefly "corrected" to `ADC/0.6 + 10` on the reading that D5
+// (PDZ10B) is a 10 V zener in series with the R18/R24 divider, making the
+// front end a 10.0..15.5 V level shifter. That reading is wrong. Under it
+// the same production data says the car charges at 12.7 V and sits at
+// 10.1 V after four days parked - a battery that could not crank an
+// engine, in a car that starts fine. Under the formula below the same
+// samples read 13.6 V while driving and decay 12.46 -> 12.04 V over four
+// days, which is a textbook lead-acid curve.
 //
-// The previous formula was `ADC + 12.0`: it dropped the 0.6 and used the
-// wrong offset, so the error grew as the battery discharged - 13.8 V read
-// as 14.3, 12.0 V as 13.2, and a genuinely flat 11.0 V as a healthy-looking
-// 12.6. triggerVoltageLevel=1200 could therefore only fire at an actual
-// 10.0 V, which is well past the point of doing the battery harm.
-static const float ADC_ZENER_V   = 10.0f;   // D5 PDZ10B
-static const float ADC_DIVIDER   = 0.6f;    // R24 / (R18 + R24)
-
+// Known limitation, and it matters for any battery-protection logic: the
+// scale bottoms out at 12.0 V. A battery below that reads 12.0 and stops
+// being distinguishable, so the useful decision band is roughly
+// 12.0..13.8 V - enough to see "discharging" and "alternator running",
+// not enough to see "flat". Characterising the front end properly needs a
+// two-point bench measurement, not another look at the schematic.
 static float getVoltage() {
     int pin = cfg.hasPa ? PIN_ADC_PA : PIN_ADC_NOPA;
     int raw = analogRead(pin);
     if (cfg.hasPa) {
-        return ((raw * 3.3f) / 65536.0f) / ADC_DIVIDER + ADC_ZENER_V;
+        return ((raw * 3.3f) / 65536.0f) + 10.6f + 1.4f;
     }
     return ((raw * 3.3f) / 65536.0f) * 2.0f;
 }
@@ -879,8 +882,7 @@ void setup() {
         // Powerpole confirms or corrects ADC_ZENER_V / ADC_DIVIDER instead
         // of anyone having to infer them from a beacon's telemetry.
         int rawAdc = analogRead(cfg.hasPa ? PIN_ADC_PA : PIN_ADC_NOPA);
-        snprintf(cfgMsg, sizeof(cfgMsg), "ADC raw=%d -> %.2f V (zener %.1f, div %.2f)",
-                 rawAdc, getVoltage(), ADC_ZENER_V, ADC_DIVIDER);
+        snprintf(cfgMsg, sizeof(cfgMsg), "ADC raw=%d -> %.2f V", rawAdc, getVoltage());
         yellow(cfgMsg);
     }
 
