@@ -19,9 +19,15 @@ zero warnings; treat any warning as introduced by your change. Do not delete
 dependencies, and removing it turns an offline build into a networked one.
 
 `pio run -t uploadfs` overwrites `config.txt` on the device and will destroy
-the owner's callsign and settings. A firmware `.uf2` writes only the sketch
-region, so ordinary flashing leaves the filesystem alone. Back up
-`/Volumes/APRSTRKR/config.txt` before anything that touches the filesystem.
+the owner's callsign and settings - and `/meshid.bin`, the station's MeshCore
+identity, which cannot be regenerated without changing its address on the
+mesh. A firmware `.uf2` writes only the sketch region, so ordinary flashing
+leaves the filesystem alone. Back up both before anything that touches the
+filesystem.
+
+**Editing `config.txt` only takes effect if the drive is *ejected*.** Writing
+it and then `diskutil unmount`-ing, or unmounting and then flashing, loses the
+sector - the write never reaches flash. Eject: it commits and reboots.
 
 ## Things that look like bugs but are not
 
@@ -65,6 +71,39 @@ between that call and `sb.updateAfterBeacon()` leaves `_lastLat` at 999, which
 makes `shouldBeacon()` true on every 50 ms pass and erases a flash sector each
 time. Suppress the *call* to `sendMetadata()`, never the transmission inside
 it, or `metadataForced` is consumed and receivers lose PARM/UNIT/EQNS.
+
+## MeshCore adverts
+
+`src/meshcore.cpp` puts the tracker on the IARU R1 ham MeshCore channel
+(434.890 MHz, 62.5 kHz, SF8, CR4:8) alongside APRS, transmit-only. Wire
+formats are verified against `../meshcore-repeater` (`src/packet.h`,
+`src/advert.h`), itself verified against upstream MeshCore.
+
+- **One radio, two profiles.** `TrackerRadio::setMode()` retunes between them.
+  They share only the sync word - MeshCore's default is RadioLib's 0x12
+  expanded to 0x1424, the same value APRS uses - so frequency, bandwidth,
+  spreading factor, coding rate and preamble all change, and LDRO flips
+  because SF12/125 is a 32.8 ms symbol and SF8/62.5 is 4.1 ms.
+- **An advert never shares a pass with an APRS beacon**, metadata or an alert.
+  A retune must not land between another transmission's frames, and yielding
+  costs one 50 ms loop pass. The check must sit *above* the "nothing to do"
+  early return in `loop()` - below it the advert is unreachable, which is how
+  it was first written and why it never fired.
+- **Route is DIRECT by default, not FLOOD.** A repeater gates a position to
+  APRS-IS *before* it decides whether to forward (`meshcore-repeater`
+  `src/mesh.c`), so direct still reaches APRS-IS without a moving station
+  re-flooding the mesh. `meshRoute=flood` restores normal behaviour.
+- **`meshNodeType` must be `chat` or `repeater`** to reach APRS-IS;
+  `aprsis_gate_node()` ignores `sensor` and `room`.
+- **No advert until GPS time is valid.** MeshCore uses the timestamp for
+  freshness and this board has no RTC, so there is no mesh presence indoors.
+  That is deliberate, not a gap.
+- **Telemetry stays on APRS.** MeshCore telemetry is request/response
+  CayenneLPP, so serving it needs a receive path, dedup, paths and an ACL - a
+  whole node. The advert's `app_data` is 32 bytes with no telemetry field, so
+  it cannot be pushed either.
+- Ed25519 signing measured at **39 ms** on this board (orlp/ed25519, the same
+  library MeshCore vendors), so it needs no watchdog special-casing.
 
 ## V2: transmitting on USB power
 

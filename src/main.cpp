@@ -22,6 +22,7 @@
 #include "aprs.h"
 #include "smartbeacon.h"
 #include "radio.h"
+#include "meshcore.h"
 
 // ============================================================
 // VERSION
@@ -88,6 +89,9 @@ JitterLock jitter;
 // ============================================================
 // Telemetry state
 // ============================================================
+
+static unsigned long lastMeshAdvert = 0;
+static bool          meshAdvertSent = false;
 
 static uint16_t sequence = 0;
 static unsigned long lastDebugPrint = 0;
@@ -532,6 +536,56 @@ static void sendMetadata() {
 }
 
 // ============================================================
+// MeshCore advert
+//
+// MeshCore stamps adverts with UNIX seconds and uses them for
+// freshness, and this board has no RTC - so an advert waits for GPS
+// time rather than inventing one. That means no mesh presence indoors,
+// which is the honest trade: a mesh full of adverts dated 1970 is
+// worse than a station that is quiet until it knows what time it is.
+// ============================================================
+
+static uint32_t gpsUnixTime() {
+    if (!gps.date.isValid() || !gps.time.isValid() || gps.date.year() < 2023) return 0;
+
+    // Days from the civil epoch (Howard Hinnant's algorithm), which is
+    // exact and needs no table.
+    int      y = gps.date.year();
+    unsigned m = gps.date.month();
+    unsigned d = gps.date.day();
+    y -= m <= 2;
+    const int      era = (y >= 0 ? y : y - 399) / 400;
+    const unsigned yoe = (unsigned)(y - era * 400);
+    const unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    const long     days = (long)era * 146097 + (long)doe - 719468;
+
+    return (uint32_t)days * 86400UL + gps.time.hour() * 3600UL +
+           gps.time.minute() * 60UL + gps.time.second();
+}
+
+static void sendMeshAdvert(float lat, float lon) {
+    uint32_t now = gpsUnixTime();
+    if (now == 0) return;
+
+    digitalWrite(PIN_LED_LORA, HIGH);
+
+    char buf[128];
+    snprintf(buf, sizeof(buf), "TX MESH: %s advert %s @ %.5f,%.5f",
+             cfg.meshNodeType, cfg.meshName, lat, lon);
+    purple(buf);
+
+    if (!MeshCore::sendAdvert(cfg, lat, lon, now)) {
+        red("MESH ADVERT FAILED");
+    }
+
+    digitalWrite(PIN_LED_LORA, LOW);
+    lastMeshAdvert = millis();
+    meshAdvertSent = true;
+    watchdog_update();
+}
+
+// ============================================================
 // Send Voltage Alert
 // ============================================================
 
@@ -629,6 +683,27 @@ void setup() {
         }
     }
 
+    // MeshCore identity, while the filesystem is still ours - once
+    // FatFSUSB has it, the host owns it and we must not write.
+    // The result is reported later: FatFSUSB.begin() below re-enumerates
+    // the device and everything printed before the host comes back is
+    // lost, which is exactly what hid this line the first time.
+    char meshBoot[96] = "";
+    bool meshBootOk = false;
+    if (cfg.meshEnabled) {
+        char meshErr[96] = "";
+        if (MeshCore::begin(meshErr, sizeof(meshErr))) {
+            const uint8_t *pk = MeshCore::publicKey();
+            snprintf(meshBoot, sizeof(meshBoot),
+                     "MeshCore identity: %s '%s' (%02X%02X%02X%02X...)",
+                     cfg.meshNodeType, cfg.meshName, pk[0], pk[1], pk[2], pk[3]);
+            meshBootOk = true;
+        } else {
+            snprintf(meshBoot, sizeof(meshBoot), "%s", meshErr);
+            cfg.meshEnabled = false;
+        }
+    }
+
     // Start USB mass storage (after all file operations). Ejecting
     // reboots so the new config takes effect - and nothing more, now
     // that the transmitter no longer depends on the eject.
@@ -646,6 +721,15 @@ void setup() {
     delay(250);
 
     green("USB mass storage active");
+
+    if (meshBoot[0]) {
+        if (meshBootOk) {
+            green(meshBoot);
+        } else {
+            red(meshBoot);
+            yellow("MeshCore disabled for this boot");
+        }
+    }
 
     // Print config summary
     snprintf(banner, sizeof(banner), " -- Tracker Booted: %s -=- %s", cfg.callsign, VERSION);
@@ -719,6 +803,14 @@ void setup() {
                  cfg.power, TrackerRadio::appliedPower());
         yellow(cfgMsg);
     }
+    if (cfg.meshEnabled) {
+        snprintf(cfgMsg, sizeof(cfgMsg),
+                 "MeshCore: %.3f MHz BW%.1f SF%d CR4:%d, %s advert every %ds",
+                 cfg.meshFrequency, cfg.meshBandwidth, cfg.meshSf, cfg.meshCr,
+                 cfg.meshRoute, cfg.meshInterval);
+        yellow(cfgMsg);
+    }
+
     if (cfg.fullDebug) {
         char radioInfo[160];
         TrackerRadio::describe(radioInfo, sizeof(radioInfo));
@@ -928,8 +1020,23 @@ void loop() {
     // Daily metadata timer
     bool metadataDue = metadataForced || ((nowMs - lastMetadataSend) >= 86400000UL);
 
+    bool meshDue = cfg.meshEnabled && MeshCore::ready() &&
+                   (!meshAdvertSent ||
+                    (nowMs - lastMeshAdvert) >= (unsigned long)cfg.meshInterval * 1000UL);
+
     // Nothing to do?
-    if (!sendBeacon && pendingVoltAlert < 0 && !metadataDue) {
+    if (!sendBeacon && pendingVoltAlert < 0 && !metadataDue && !meshDue) {
+        delay(50);
+        return;
+    }
+
+    // MeshCore advert, on a pass of its own.
+    //
+    // Never in the same pass as an APRS beacon, metadata or an alert: the
+    // two networks use different on-air profiles, so a retune must not land
+    // between the frames of something else. Yielding costs one 50 ms pass.
+    if (meshDue && !sendBeacon && pendingVoltAlert < 0 && !metadataDue) {
+        sendMeshAdvert(lat, lon);
         delay(50);
         return;
     }

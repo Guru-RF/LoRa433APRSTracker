@@ -43,6 +43,29 @@ extern FS FatFS;
 // not. That is the failure mode that cost an evening of debugging, and
 // it is worth more than the 6 dB it would buy.
 #define USB_PA_DRIVE_MAX      8
+
+// --- MeshCore (IARU R1 ham profile) ---
+// Off until the operator provisions it: enabling mints an Ed25519
+// identity and puts the station on a shared network under its own name.
+#define DEFAULT_MESH_ENABLED   false
+#define DEFAULT_MESH_NAME      "NOCALL"
+// chat | repeater | room | sensor. A repeater gates chat and repeater
+// adverts to APRS-IS and ignores the rest, so sensor is a poor choice
+// for a tracker despite sounding right.
+#define DEFAULT_MESH_NODE_TYPE "chat"
+// direct | flood. Direct still reaches APRS-IS - a repeater gates the
+// position before it decides whether to forward - but does not make a
+// moving station re-flood across the whole mesh.
+#define DEFAULT_MESH_ROUTE     "direct"
+#define DEFAULT_MESH_INTERVAL  900
+// The RFC's 70 cm ham calling channel. Occupied ~434.859..434.921 MHz;
+// nothing may be emitted above 435.000, which protects the
+// amateur-satellite segment.
+#define DEFAULT_MESH_FREQ      434.890f
+#define DEFAULT_MESH_BW        62.5f
+#define DEFAULT_MESH_SF        8
+#define DEFAULT_MESH_CR        8
+#define DEFAULT_MESH_PREAMBLE  16
 // Refuse to transmit at all while a computer is attached, rather than
 // dropping to usbPaDrive. For a port that cannot supply even the
 // floor drive.
@@ -121,6 +144,18 @@ struct TrackerConfig {
     bool   fullDebug;
     bool   usbTxInhibit;
     int    usbPaDrive;
+
+    // MeshCore
+    bool   meshEnabled;
+    char   meshName[24];
+    char   meshNodeType[12];
+    char   meshRoute[8];
+    int    meshInterval;
+    float  meshFrequency;
+    float  meshBandwidth;
+    int    meshSf;
+    int    meshCr;
+    int    meshPreamble;
     float  loraFrequency;
     char   radioChip[12];
     char   loraTcxo[8];
@@ -168,6 +203,17 @@ static void configSetDefaults(TrackerConfig &cfg) {
     cfg.fullDebug = DEFAULT_FULL_DEBUG;
     cfg.usbTxInhibit = DEFAULT_USB_TX_INHIBIT;
     cfg.usbPaDrive = DEFAULT_USB_PA_DRIVE;
+
+    cfg.meshEnabled = DEFAULT_MESH_ENABLED;
+    strncpy(cfg.meshName, DEFAULT_MESH_NAME, sizeof(cfg.meshName));
+    strncpy(cfg.meshNodeType, DEFAULT_MESH_NODE_TYPE, sizeof(cfg.meshNodeType));
+    strncpy(cfg.meshRoute, DEFAULT_MESH_ROUTE, sizeof(cfg.meshRoute));
+    cfg.meshInterval = DEFAULT_MESH_INTERVAL;
+    cfg.meshFrequency = DEFAULT_MESH_FREQ;
+    cfg.meshBandwidth = DEFAULT_MESH_BW;
+    cfg.meshSf = DEFAULT_MESH_SF;
+    cfg.meshCr = DEFAULT_MESH_CR;
+    cfg.meshPreamble = DEFAULT_MESH_PREAMBLE;
     cfg.loraFrequency = DEFAULT_LORA_FREQ;
     strncpy(cfg.radioChip, DEFAULT_RADIO_CHIP, sizeof(cfg.radioChip));
     strncpy(cfg.loraTcxo, DEFAULT_LORA_TCXO, sizeof(cfg.loraTcxo));
@@ -255,6 +301,28 @@ static void configSetValue(TrackerConfig &cfg, const char *key, const char *val)
         cfg.usbTxInhibit = (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0);
     } else if (strcasecmp(key, "usbPaDrive") == 0) {
         cfg.usbPaDrive = constrain(atoi(val), -9, USB_PA_DRIVE_MAX);
+    } else if (strcasecmp(key, "meshEnabled") == 0) {
+        cfg.meshEnabled = (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0);
+    } else if (strcasecmp(key, "meshName") == 0) {
+        strncpy(cfg.meshName, val, sizeof(cfg.meshName) - 1);
+    } else if (strcasecmp(key, "meshNodeType") == 0) {
+        strncpy(cfg.meshNodeType, val, sizeof(cfg.meshNodeType) - 1);
+    } else if (strcasecmp(key, "meshRoute") == 0) {
+        strncpy(cfg.meshRoute, val, sizeof(cfg.meshRoute) - 1);
+    } else if (strcasecmp(key, "meshInterval") == 0) {
+        cfg.meshInterval = constrain(atoi(val), 60, 86400);
+    } else if (strcasecmp(key, "meshFrequency") == 0) {
+        // Never above 435.000 - the amateur-satellite segment starts there
+        // and the occupied bandwidth reaches ~31 kHz above the carrier.
+        cfg.meshFrequency = constrain((float)atof(val), 430.0f, 434.960f);
+    } else if (strcasecmp(key, "meshBandwidth") == 0) {
+        cfg.meshBandwidth = (float)atof(val);
+    } else if (strcasecmp(key, "meshSf") == 0) {
+        cfg.meshSf = constrain(atoi(val), 5, 12);
+    } else if (strcasecmp(key, "meshCr") == 0) {
+        cfg.meshCr = constrain(atoi(val), 5, 8);
+    } else if (strcasecmp(key, "meshPreamble") == 0) {
+        cfg.meshPreamble = constrain(atoi(val), 6, 64);
     } else if (strcasecmp(key, "loraFrequency") == 0) {
         cfg.loraFrequency = atof(val);
     } else if (strcasecmp(key, "radioChip") == 0) {
@@ -350,6 +418,16 @@ static const char *CONFIG_TEMPLATE =
     "# Or refuse to transmit at all while a computer is attached.\n"
     "usbTxInhibit=false\n"
     "\n"
+    "# --- MeshCore (IARU R1 ham profile, 70cm) ---\n"
+    "# Mints an Ed25519 identity in /meshid.bin on first enable.\n"
+    "meshEnabled=false\n"
+    "meshName=NOCALL\n"
+    "# chat or repeater are gated to APRS-IS; sensor and room are not\n"
+    "meshNodeType=chat\n"
+    "# direct still reaches APRS-IS without re-flooding the mesh\n"
+    "meshRoute=direct\n"
+    "meshInterval=900\n"
+    "\n"
     "# --- Debug ---\n"
     "fullDebug=false\n";
 
@@ -401,6 +479,16 @@ static bool configCreateDefault() {
     f.println("usbPaDrive=-9");
     f.println("# Or refuse to transmit at all while a computer is attached.");
     f.println("usbTxInhibit=false");
+    f.println("");
+    f.println("# --- MeshCore (IARU R1 ham profile, 70cm) ---");
+    f.println("# Mints an Ed25519 identity in /meshid.bin on first enable.");
+    f.println("meshEnabled=false");
+    f.println("meshName=NOCALL");
+    f.println("# chat or repeater are gated to APRS-IS; sensor and room are not");
+    f.println("meshNodeType=chat");
+    f.println("# direct still reaches APRS-IS without re-flooding the mesh");
+    f.println("meshRoute=direct");
+    f.println("meshInterval=900");
     f.println("");
     f.println("fullDebug=false");
     f.close();

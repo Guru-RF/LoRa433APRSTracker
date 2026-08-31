@@ -64,5 +64,15 @@ usbPaDrive=-9
 # Or refuse to transmit at all while a computer is attached.
 usbTxInhibit=false
 
+# --- MeshCore (IARU R1 ham profile, 70cm) ---
+# Mints an Ed25519 identity in /meshid.bin on first enable.
+meshEnabled=false
+meshName=NOCALL
+# chat or repeater are gated to APRS-IS; sensor and room are not
+meshNodeType=chat
+# direct still reaches APRS-IS without re-flooding the mesh
+meshRoute=direct
+meshInterval=900
+
 # --- Debug ---
 fullDebug=false

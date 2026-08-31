@@ -97,6 +97,32 @@ says so on the console and winks the power LED once every 5 seconds. The LoRa
 LED is left alone either way, so a blinking LoRa LED always means the
 transmitter is keyed.
 
+### MeshCore
+
+The tracker can also announce itself on the IARU R1 amateur MeshCore channel -
+**434.890 MHz, 62.5 kHz, SF8, CR4:8** - alongside its normal APRS beacons, on
+the same radio. It signs an Ed25519 advert carrying its position; a MeshCore
+repeater within range gates that to APRS-IS over IP.
+
+It is transmit-only by design. Battery, temperature, humidity and satellite
+count stay on APRS, where they are already carried as typed telemetry -
+MeshCore's telemetry is request/response, so serving it would mean receiving,
+and an advert has no room for it either.
+
+- **meshEnabled** - `true`/`false` (default `false`). Enabling mints an
+  Ed25519 identity in `/meshid.bin` on first boot. Keep a backup: it is the
+  station's address on the mesh and `uploadfs` or a factory reset destroys it.
+- **meshName** - name shown on the mesh, up to 23 characters
+- **meshNodeType** - `chat` (default) or `repeater` are gated to APRS-IS;
+  `sensor` and `room` join the mesh but are not gated
+- **meshRoute** - `direct` (default) or `flood`. Direct still reaches APRS-IS,
+  because a repeater gates a position before deciding whether to forward it,
+  but keeps a moving station from re-flooding the whole mesh.
+- **meshInterval** - seconds between adverts (default `900`)
+
+Adverts wait for a GPS fix: MeshCore stamps them with real time and the
+tracker has no clock of its own, so there is no mesh presence indoors.
+
 ### What `power` means depends on the board
 
 On **V1** it is the chip's output power in dBm, capped at +20.

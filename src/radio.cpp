@@ -87,6 +87,7 @@ static float          tcxoVolts  = 0.0f;
 static bool           spiStarted = false;
 static bool           modulePa   = false;   // module has its own amplifier
 static float          ocpMa      = LORA_OCP_SX126X_MA;   // as configured, for setDrive()
+static RadioMode      activeMode = RADIO_MODE_APRS;
 static bool           useLdoReg  = false;   // die regulator: LDO vs DC-DC
 
 // The 16-byte version string at register 0x0320 is the only way to tell
@@ -534,6 +535,70 @@ bool TrackerRadio::send(const uint8_t *data, size_t len) {
     watchdog_update();
     return done;
 }
+
+// Switch on-air profile between packets.
+//
+// The two networks share only the sync word, so everything else is
+// reprogrammed. RadioLib applies these independently, and setOutputPower()
+// inside setDrive() restores whatever OCP it found - so drive and OCP are
+// re-applied last, in that order, or a retune silently reverts loraOcp.
+bool TrackerRadio::setMode(RadioMode m, const TrackerConfig &cfg,
+                           char *err, size_t errLen) {
+    if (!phy) {
+        snprintf(err, errLen, "radio not initialised");
+        return false;
+    }
+    if (m == activeMode) return true;
+
+    const bool mesh = (m == RADIO_MODE_MESH);
+    const float    freq      = mesh ? cfg.meshFrequency : cfg.loraFrequency;
+    const float    bw        = mesh ? cfg.meshBandwidth : LORA_BW_KHZ;
+    const uint8_t  sf        = mesh ? (uint8_t)cfg.meshSf : LORA_SF;
+    const uint8_t  cr        = mesh ? (uint8_t)cfg.meshCr : LORA_CR;
+    const uint16_t preamble  = mesh ? (uint16_t)cfg.meshPreamble : LORA_PREAMBLE;
+
+    // Bandwidth, spreading factor and coding rate live on the concrete
+    // drivers rather than PhysicalLayer, so the branch is unavoidable.
+    int16_t state;
+    if (activeChip == RADIO_CHIP_SX127X) {
+        state = radioSx127x.setFrequency(freq);
+        if (state == RADIOLIB_ERR_NONE) state = radioSx127x.setBandwidth(bw);
+        if (state == RADIOLIB_ERR_NONE) state = radioSx127x.setSpreadingFactor(sf);
+        if (state == RADIOLIB_ERR_NONE) state = radioSx127x.setCodingRate(cr);
+        if (state == RADIOLIB_ERR_NONE) state = radioSx127x.setPreambleLength(preamble);
+    } else {
+        state = sx126->setFrequency(freq);
+        if (state == RADIOLIB_ERR_NONE) state = sx126->setBandwidth(bw);
+        if (state == RADIOLIB_ERR_NONE) state = sx126->setSpreadingFactor(sf);
+        if (state == RADIOLIB_ERR_NONE) state = sx126->setCodingRate(cr);
+        if (state == RADIOLIB_ERR_NONE) state = sx126->setPreambleLength(preamble);
+    }
+    if (state != RADIOLIB_ERR_NONE) {
+        snprintf(err, errLen, "%s retune failed (%d)", mesh ? "mesh" : "APRS", state);
+        return false;
+    }
+
+    // Low data rate optimisation is mandatory above a 16 ms symbol and wrong
+    // below it, and the two profiles fall either side: SF12 at 125 kHz is
+    // 32.8 ms, SF8 at 62.5 kHz is 4.1 ms.
+    float symbolMs = (float)(1UL << sf) / bw;
+    if (activeChip == RADIO_CHIP_SX127X) radioSx127x.forceLDRO(symbolMs >= 16.0f);
+    else                                 sx126->forceLDRO(symbolMs >= 16.0f);
+
+    activeMode = m;
+
+    // Force a re-programme even if the number is unchanged: RadioLib's
+    // setters above may have reset the PA config underneath us.
+    int8_t want = appliedPwr;
+    appliedPwr = INT8_MIN;
+    if (!setDrive(want)) {
+        snprintf(err, errLen, "%s drive re-apply failed", mesh ? "mesh" : "APRS");
+        return false;
+    }
+    return true;
+}
+
+RadioMode TrackerRadio::mode() { return activeMode; }
 
 // Change the drive between packets.
 //

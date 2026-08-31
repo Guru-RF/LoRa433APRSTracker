@@ -18,6 +18,16 @@
 #include <Arduino.h>
 #include "config_file.h"
 
+// Which on-air profile the radio is currently programmed for. One SX1262
+// serves both networks by retuning between packets: they share nothing but
+// the sync word (MeshCore's default is RadioLib's 0x12 expanded, the same
+// value LoRa APRS uses), so frequency, bandwidth, spreading factor, coding
+// rate and preamble all change.
+enum RadioMode {
+    RADIO_MODE_APRS = 0,    // 433.775, BW125, SF12, CR4:5, preamble 8
+    RADIO_MODE_MESH         // 434.890, BW62.5, SF8,  CR4:8, preamble 16
+};
+
 enum RadioChip {
     RADIO_CHIP_NONE = 0,
     RADIO_CHIP_SX127X,      // SX1276/77/78/79, RFM95/96/97/98
@@ -44,6 +54,15 @@ bool send(const uint8_t *data, size_t len);
 // power. Cheap and idempotent - a value already in force is a no-op -
 // so callers may set it before every frame.
 bool setDrive(int8_t dbm);
+
+// Reprogram the on-air profile. Idempotent - reselecting the current mode is
+// a no-op - so callers may set it before every frame. Never call it while a
+// transmission is in flight; send() is synchronous, so sequencing it around
+// send() is enough. Re-applies OCP and drive, which setModem() would
+// otherwise leave at RadioLib's defaults.
+bool setMode(RadioMode mode, const TrackerConfig &cfg, char *err, size_t errLen);
+
+RadioMode mode();
 
 RadioChip   chip();
 const char *chipName();
