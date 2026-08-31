@@ -67,6 +67,15 @@ extern FS FatFS;
 #define DEFAULT_BATT_LOW_V       1200   // V*100 - below this, back off
 #define DEFAULT_BATT_CHARGE_V    1300   // V*100 - above this, alternator is on
 #define DEFAULT_BATT_PA_DRIVE    10     // drive while the battery is unsupported
+// Seconds after boot before battery protection may act. Only useful on a
+// tracker wired to switched/ignition power, where it boots as the engine
+// cranks and the first reading is of the starter motor rather than the
+// battery. On permanent power - which is how a tracker that beacons all
+// night is wired - cranking happens mid-run and this covers nothing; the
+// consecutive-sample rule in src/main.cpp is what handles that case.
+// 0 disables it, which is the right setting for an EV: no starter motor,
+// no crank dip, and the 12 V DC-DC comes up immediately.
+#define DEFAULT_BATT_START_DELAY 10
 
 // --- Parked ---
 // Stationary this long and the beacon rate drops to sbParkedRate. 0 = off.
@@ -210,6 +219,7 @@ struct TrackerConfig {
     int    battLowVoltage;
     int    battChargeVoltage;
     int    battPaDrive;
+    int    battStartDelay;
     int    sbParkedAfter;
     int    sbParkedRate;
 
@@ -278,6 +288,7 @@ static void configSetDefaults(TrackerConfig &cfg) {
     cfg.battLowVoltage = DEFAULT_BATT_LOW_V;
     cfg.battChargeVoltage = DEFAULT_BATT_CHARGE_V;
     cfg.battPaDrive = DEFAULT_BATT_PA_DRIVE;
+    cfg.battStartDelay = DEFAULT_BATT_START_DELAY;
     cfg.sbParkedAfter = DEFAULT_SB_PARKED_AFTER;
     cfg.sbParkedRate = DEFAULT_SB_PARKED_RATE;
 
@@ -401,6 +412,8 @@ static void configSetValue(TrackerConfig &cfg, const char *key, const char *val)
         cfg.battChargeVoltage = constrain(atoi(val), 1250, 1500);
     } else if (strcasecmp(key, "battPaDrive") == 0) {
         cfg.battPaDrive = constrain(atoi(val), -9, 22);
+    } else if (strcasecmp(key, "battStartDelay") == 0) {
+        cfg.battStartDelay = constrain(atoi(val), 0, 600);
     } else if (strcasecmp(key, "sbParkedAfter") == 0) {
         cfg.sbParkedAfter = constrain(atoi(val), 0, 86400);
     } else if (strcasecmp(key, "sbParkedRate") == 0) {
@@ -540,6 +553,8 @@ static const char *CONFIG_TEMPLATE =
     "battLowVoltage=1200\n"
     "battChargeVoltage=1300\n"
     "battPaDrive=10\n"
+    "# 0 for an EV - no starter motor, so nothing to ride out\n"
+    "battStartDelay=10\n"
     "\n"
     "# --- Parked ---\n"
     "# Stationary this long (s) and the beacon rate drops. 0 = off.\n"
@@ -624,6 +639,8 @@ static bool configCreateDefault() {
     f.println("battLowVoltage=1200");
     f.println("battChargeVoltage=1300");
     f.println("battPaDrive=10");
+    f.println("# 0 for an EV - no starter motor, so nothing to ride out");
+    f.println("battStartDelay=10");
     f.println("");
     f.println("# --- Parked ---");
     f.println("# Stationary this long (s) and the beacon rate drops. 0 = off.");

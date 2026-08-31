@@ -120,7 +120,11 @@ voltage, which proves a battery and alternator are actually present. A tracker
 on USB or a bench supply reads the 12.00 V floor, which looks exactly like a
 flat battery, and would otherwise throttle itself forever for no reason. It
 also skips readings taken within 5 s of a transmission, since the amplifier
-sags the rail while it keys.
+sags the rail while it keys, and requires **two consecutive** low readings
+before acting. That second rule is what covers cranking on a permanently-wired
+tracker, where the engine starts hours into a run and no boot delay can help -
+at 30 s between samples, a crank dip of a second or two can only ever spoil one
+of them.
 
 - **sbParkedAfter** - seconds stationary before the beacon rate drops, default
   `14400` (4 hours); `0` disables it

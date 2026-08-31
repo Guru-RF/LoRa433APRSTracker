@@ -71,6 +71,8 @@ battProtect=true
 battLowVoltage=1200
 battChargeVoltage=1300
 battPaDrive=10
+# 0 for an EV - no starter motor, so no crank dip to ride out
+battStartDelay=10
 
 # --- Parked ---
 # Stationary this long (seconds) and the beacon rate drops. 0 = off.

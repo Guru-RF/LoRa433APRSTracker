@@ -246,21 +246,35 @@ static bool txInhibited() {
 // It does not sample near a transmission. The PA pulls a few hundred
 // milliamps and sags the rail, so a reading taken just after a frame would
 // be of the sag rather than the battery.
+//
+// Cranking is ridden out two different ways, because it arrives two
+// different ways depending on how the tracker is wired.
+//
+// On switched/ignition power the tracker boots as the engine cranks, so
+// its first readings are of the starter motor. battStartDelay holds
+// protection off until that has passed. On permanent power - how any
+// tracker that beacons overnight is wired - the engine cranks hours into a
+// run and no boot delay can help, so a single low sample is never enough:
+// BATT_LOW_SAMPLES consecutive ones are required, and at 30 s apart a
+// crank dip of a second or two can only ever spoil one of them.
 // ============================================================
 
 static const unsigned long BATT_SAMPLE_MS   = 30000;
 static const unsigned long BATT_TX_QUIET_MS = 5000;
+static const uint8_t       BATT_LOW_SAMPLES = 2;
 
 static bool          battArmed = false;      // a charging voltage has been seen
 static bool          battLow = false;
 static unsigned long battLastSample = 0;
 static bool          battSampled = false;
+static uint8_t       battLowStreak = 0;
 static unsigned long lastTxEnd = 0;
 
 static void battUpdate() {
     if (!cfg.battProtect || !cfg.voltage) { battLow = false; return; }
 
     unsigned long now = millis();
+    if (now < (unsigned long)cfg.battStartDelay * 1000UL) return;   // riding out the crank
     if (battSampled && (now - battLastSample) < BATT_SAMPLE_MS) return;
     if (lastTxEnd && (now - lastTxEnd) < BATT_TX_QUIET_MS) return;   // rail still recovering
     battLastSample = now;
@@ -278,8 +292,12 @@ static void battUpdate() {
         }
         battArmed = true;
         battLow = false;                       // alternator is running
+        battLowStreak = 0;
     } else if (battArmed && vx100 <= cfg.battLowVoltage) {
-        battLow = true;
+        if (battLowStreak < BATT_LOW_SAMPLES) battLowStreak++;
+        if (battLowStreak >= BATT_LOW_SAMPLES) battLow = true;
+    } else {
+        battLowStreak = 0;      // one high reading clears a partial streak
     }
 
     if (battLow != was) {
