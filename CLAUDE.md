@@ -72,6 +72,28 @@ makes `shouldBeacon()` true on every 50 ms pass and erases a flash sector each
 time. Suppress the *call* to `sendMetadata()`, never the transmission inside
 it, or `metadataForced` is consumed and receivers lose PARM/UNIT/EQNS.
 
+## APRS airtime
+
+At SF12 an 82-byte frame is 3.45 s on air, so anything that shortens it or
+sends it less often matters far more than on 1200 baud AX.25. Two
+non-obvious facts, both from primary sources:
+
+- **The payload quantises in 5-byte, 164 ms steps.** Trimming fewer than
+  five bytes saves nothing at all.
+- **Altitude is free while stationary.** APRS 1.0.1 chapter 9 page 38: when
+  the compressed position's `c` byte is a space, "the csT bytes are ignored".
+  Page 40: with the T byte's NMEA-source bits set to GGA (bits 4,3 = 10),
+  `cs` carries altitude = 1.002^cs feet. So a parked tracker can put
+  altitude in three bytes it was already wasting, instead of nine more for
+  `/A=`. Course/speed and altitude are mutually exclusive in that field;
+  moving, course/speed wins.
+- **aprs.fi caches the comment.** Its author: the comment "will be forgotten
+  if you still transmit packets without a comment after 7 days". So
+  `commentInterval` is safe on aprs.fi - but it defaults to every beacon
+  because other consumers may not cache.
+- Compressed reports allow **40 comment characters**, not the 43 of an
+  uncompressed one.
+
 ## MeshCore adverts
 
 `src/meshcore.cpp` puts the tracker on the IARU R1 ham MeshCore channel

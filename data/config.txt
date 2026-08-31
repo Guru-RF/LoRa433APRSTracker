@@ -70,6 +70,9 @@ usbTxInhibit=false
 # arrival anyway, and this tracker cannot receive messages.
 aprsTimestamp=true
 aprsAltitude=true
+# aprs.fi keeps the last comment for 7 days, so it need not go out
+# on every beacon - it is a third of the frame. 1 = every beacon.
+commentInterval=1
 
 # --- MeshCore (IARU R1 ham profile, 70cm) ---
 # Mints an Ed25519 identity in /meshid.bin on first enable.

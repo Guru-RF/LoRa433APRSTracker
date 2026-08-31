@@ -57,6 +57,14 @@ extern FS FatFS;
 // altitude is 9.
 #define DEFAULT_APRS_TIMESTAMP true
 #define DEFAULT_APRS_ALTITUDE  true
+// Send the comment on every Nth beacon. aprs.fi keeps the last comment it
+// saw and, per its author, only "forgets it if you still transmit packets
+// without a comment after 7 days" - so a station beaconing every 3 minutes
+// can send it every 6th and still be two orders of magnitude inside that.
+// The comment is a third of the frame, so this is the single biggest
+// airtime saving available. 1 = every beacon, which is the default because
+// other consumers may not cache the way aprs.fi does.
+#define DEFAULT_COMMENT_INTERVAL 1
 
 #define DEFAULT_MESH_ENABLED   false
 #define DEFAULT_MESH_NAME      "NOCALL"
@@ -170,6 +178,7 @@ struct TrackerConfig {
     // MeshCore
     bool   aprsTimestamp;
     bool   aprsAltitude;
+    int    commentInterval;
 
     bool   meshEnabled;
     char   meshName[24];
@@ -231,6 +240,7 @@ static void configSetDefaults(TrackerConfig &cfg) {
 
     cfg.aprsTimestamp = DEFAULT_APRS_TIMESTAMP;
     cfg.aprsAltitude = DEFAULT_APRS_ALTITUDE;
+    cfg.commentInterval = DEFAULT_COMMENT_INTERVAL;
 
     cfg.meshEnabled = DEFAULT_MESH_ENABLED;
     strncpy(cfg.meshName, DEFAULT_MESH_NAME, sizeof(cfg.meshName));
@@ -333,6 +343,8 @@ static void configSetValue(TrackerConfig &cfg, const char *key, const char *val)
         cfg.aprsTimestamp = (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0);
     } else if (strcasecmp(key, "aprsAltitude") == 0) {
         cfg.aprsAltitude = (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0);
+    } else if (strcasecmp(key, "commentInterval") == 0) {
+        cfg.commentInterval = constrain(atoi(val), 1, 100);
     } else if (strcasecmp(key, "meshEnabled") == 0) {
         cfg.meshEnabled = (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0);
     } else if (strcasecmp(key, "meshName") == 0) {
@@ -456,6 +468,8 @@ static const char *CONFIG_TEMPLATE =
     "# on arrival anyway, and this tracker cannot receive messages.\n"
     "aprsTimestamp=true\n"
     "aprsAltitude=true\n"
+    "# aprs.fi keeps the last comment for 7 days; 1 = every beacon\n"
+    "commentInterval=1\n"
     "\n"
     "# --- MeshCore (IARU R1 ham profile, 70cm) ---\n"
     "# Mints an Ed25519 identity in /meshid.bin on first enable.\n"
@@ -524,6 +538,8 @@ static bool configCreateDefault() {
     f.println("# timestamp off sends '!' instead of '@ddhhmmz'.");
     f.println("aprsTimestamp=true");
     f.println("aprsAltitude=true");
+    f.println("# aprs.fi keeps the last comment for 7 days; 1 = every beacon");
+    f.println("commentInterval=1");
     f.println("");
     f.println("# --- MeshCore (IARU R1 ham profile, 70cm) ---");
     f.println("# Mints an Ed25519 identity in /meshid.bin on first enable.");

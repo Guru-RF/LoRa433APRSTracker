@@ -22,8 +22,12 @@ static void aprsTimestamp(char *buf, char format, int day, int hour, int minute,
 // symbol: 2 chars, e.g. "L>" (table + code)
 // speed_kmh: negative = no speed/course
 // course: 0-360 degrees, negative = no course
+// alt_ft < 0 means "no altitude". It is only used when there is no course
+// or speed to send: the two are mutually exclusive in the cs field, and for
+// a tracker course/speed is the more useful of the two while moving.
 static int aprsPosition(char *buf, float lat, float lon,
-                          float speed_kmh, float course, const char *symbol) {
+                          float speed_kmh, float course, const char *symbol,
+                          float alt_ft = -1.0f) {
     if (lat < -89.99999f || lat > 89.99999f ||
         lon < -179.99999f || lon > 179.99999f) {
         buf[0] = '\0';
@@ -81,6 +85,22 @@ static int aprsPosition(char *buf, float lat, float lon,
         if (speedNum > 89) speedNum = 89;
         buf[pos++] = (char)(speedNum + 33);
         buf[pos++] = 'A';
+    } else if (alt_ft > 1.0f) {
+        // Altitude in the cs bytes - APRS 1.0.1 chapter 9, page 40: with the
+        // T byte's NMEA-source bits set to GGA (bits 4,3 = 10), cs carries
+        // altitude = 1.002^cs feet.
+        //
+        // This is free. The same page says that when c is a space, meaning no
+        // course, speed or range, "the csT bytes are ignored" - so a
+        // stationary report was spending three bytes on nothing while
+        // altitude went out separately as a nine-byte /A= in the comment.
+        int cs = (int)(logf(alt_ft) / logf(1.002f) + 0.5f);
+        if (cs < 0) cs = 0;
+        if (cs > 91 * 91 - 1) cs = 91 * 91 - 1;
+        buf[pos++] = (char)(cs / 91 + 33);
+        buf[pos++] = (char)(cs % 91 + 33);
+        // GPS fix current (bit 5) | NMEA source GGA (bits 4,3 = 10) = 48.
+        buf[pos++] = (char)(48 + 33);
     } else {
         buf[pos++] = ' ';
         buf[pos++] = ' ';

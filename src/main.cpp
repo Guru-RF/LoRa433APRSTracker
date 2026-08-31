@@ -90,6 +90,7 @@ JitterLock jitter;
 // Telemetry state
 // ============================================================
 
+static uint16_t      beaconCount = 0;
 static unsigned long lastMeshAdvert = 0;
 static bool          meshAdvertSent = false;
 
@@ -1065,10 +1066,18 @@ void loop() {
         char ts[8];
         aprsTimestamp(ts, 'z', gps.date.day(), gps.time.hour(), gps.time.minute(), gps.time.second());
 
+        // Altitude rides in the compressed position's cs bytes whenever
+        // there is no course or speed to put there - three bytes a
+        // stationary report was wasting, against nine for a /A= in the
+        // comment. Moving, course and speed win the field and /A= is used
+        // instead if it is wanted at all.
         char aprsPos[20];
         float spdForAprs = speedKmh >= 0 ? speedKmh : -1;
         float hdgForAprs = heading >= 0 ? heading : -1;
-        aprsPosition(aprsPos, lat, lon, spdForAprs, hdgForAprs, cfg.symbol);
+        bool  movingCs   = (spdForAprs >= 0 && hdgForAprs > 0 && hdgForAprs <= 360);
+        float altFt      = (altM >= 0 && cfg.aprsAltitude) ? altM * 3.2808399f : -1.0f;
+        aprsPosition(aprsPos, lat, lon, spdForAprs, hdgForAprs, cfg.symbol,
+                     movingCs ? -1.0f : altFt);
 
         // Sequence
         sequence = (sequence + 1) % 8192;
@@ -1077,9 +1086,18 @@ void loop() {
         EEPROM.commit();
 
         // Build comment with telemetry
+        // aprs.fi keeps the last comment it saw and only drops it after
+        // seven days of comment-less packets, so sending it on every beacon
+        // buys nothing - and it is a third of the frame. Beacon 1 always
+        // carries it so a receiver has it from the start.
+        beaconCount++;
+        bool withComment = (cfg.commentInterval <= 1) ||
+                           (beaconCount % (uint16_t)cfg.commentInterval == 1);
+
         char comment[128];
         int cpos = 0;
-        cpos += snprintf(comment + cpos, sizeof(comment) - cpos, "%s|", cfg.comment);
+        cpos += snprintf(comment + cpos, sizeof(comment) - cpos, "%s|",
+                         withComment ? cfg.comment : "");
 
         char b91[8];
         base91Encode(b91, sequence);
@@ -1127,7 +1145,8 @@ void loop() {
 
         cpos += snprintf(comment + cpos, sizeof(comment) - cpos, "|");
 
-        if (altM >= 0 && cfg.aprsAltitude) {
+        // Only when the cs field could not take it - i.e. while moving.
+        if (altM >= 0 && cfg.aprsAltitude && movingCs) {
             int feet = (int)(altM * 3.2808399f);
             cpos += snprintf(comment + cpos, sizeof(comment) - cpos, "/A=%06d", feet);
         }

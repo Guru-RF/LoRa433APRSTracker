@@ -113,6 +113,21 @@ the firmware sends what it always has unless you change it:
   receive messages, so `!` is the more honest form as well as the shorter one.
 - **aprsAltitude** - `false` drops the `/A=` field.
 
+- **commentInterval** - send the comment on every Nth beacon (default `1`,
+  every beacon). aprs.fi keeps the last comment it received and, per its
+  author, only forgets it "if you still transmit packets without a comment
+  after 7 days" - so a station beaconing every 3 minutes can send it every
+  6th and stay far inside that. The comment is a third of the frame, which
+  makes this the largest single saving available. Other consumers may not
+  cache the way aprs.fi does, which is why it defaults to every beacon.
+
+Altitude is free while stationary. The compressed position's `cs` field
+carries either course/speed or altitude, and APRS 1.0.1 (chapter 9) says
+those bytes are ignored outright when there is no course or speed - so a
+parked tracker was wasting three bytes and spending nine more on a separate
+`/A=`. It now puts the altitude there, with the compression-type byte marked
+GGA. Moving, course and speed take the field and `/A=` is used instead.
+
 Trimming is only worth doing in whole 5-byte steps: at SF12 the payload
 quantises into 164 ms chunks, so shaving one to four bytes saves nothing.
 A shorter `comment` is the other easy win.
