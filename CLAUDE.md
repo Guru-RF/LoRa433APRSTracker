@@ -139,6 +139,15 @@ formats are verified against `../meshcore-repeater` (`src/packet.h`,
   it cannot be pushed either.
 - Ed25519 signing measured at **39 ms** on this board (orlp/ed25519, the same
   library MeshCore vendors), so it needs no watchdog special-casing.
+- **Group messages (`#mbox` alerts) are encrypt-then-MAC.** The repeater's
+  `channel_build_txt()` encrypts in place and leaves the buffer named `plain`,
+  so the `hmac_sha256()` call two lines later reads as though it covers the
+  plaintext. It covers the ciphertext. Getting it backwards yields a packet
+  the repeater receives, matches to the right channel, and drops with
+  "failed public-channel MAC". The channel key is `SHA256("#name")[0..15]`,
+  AES takes those 16 bytes, the HMAC takes them zero-padded to 32.
+- Crypto for this is vendored in `lib/meshcrypto` **from the repeater tree**,
+  not reimplemented, so the two cannot drift apart.
 
 ## V2: transmitting on USB power
 
