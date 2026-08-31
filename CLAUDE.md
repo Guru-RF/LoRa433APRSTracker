@@ -29,6 +29,13 @@ filesystem.
 it and then `diskutil unmount`-ing, or unmounting and then flashing, loses the
 sector - the write never reaches flash. Eject: it commits and reboots.
 
+**Watching the console takes a whole loop pass to observe anything.** A
+stationary tracker beacons every 180 s and adverts every `meshInterval`, so a
+capture shorter than about 7 minutes can easily contain zero beacons and prove
+nothing. Beware too that the first beacon of a session always carries the
+comment whatever `commentInterval` says, so it cannot confirm that setting -
+only the second one can.
+
 ## Things that look like bugs but are not
 
 - **GP15 is not a board-revision strap.** It measures low on V1 hardware too,
