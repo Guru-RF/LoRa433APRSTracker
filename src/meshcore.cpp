@@ -222,7 +222,8 @@ bool MeshCore::sendAdvert(const TrackerConfig &cfg, float lat, float lon,
 //   key      = SHA256("#name")[0..15]
 //   selector = SHA256(key, 16)[0]
 //   plain    = [ts u32 LE][txt_type 0]["sender: text"], zero-padded to 16
-//   payload  = [selector][HMAC-SHA256(key32, plain)[0..1]][AES-128-ECB(key, plain)]
+//   cipher   = AES-128-ECB(key, plain)
+//   payload  = [selector][HMAC-SHA256(key32, cipher)[0..1]][cipher]
 //
 // The key asymmetry is deliberate and easy to get wrong: AES takes the
 // 16-byte key, the HMAC takes it zero-padded to 32.
@@ -258,12 +259,17 @@ bool MeshCore::sendChannelText(const TrackerConfig &cfg, const char *channel,
     if (ctlen == 0) ctlen = 16;
     while (i < ctlen) plain[i++] = 0;
 
-    uint8_t mac[32];
-    hmac_sha256(key32, sizeof(key32), plain, ctlen, mac);
-
+    // Encrypt first, then MAC the CIPHERTEXT. channel_build_txt() encrypts
+    // in place and only then calls hmac_sha256() on the same buffer, which
+    // reads like a MAC over the plaintext and is not - getting this
+    // backwards produces a packet the repeater receives, matches to the
+    // right channel, and drops with "failed public-channel MAC".
     aes128_ctx_t ac;
     aes128_init(&ac, key32);
     aes128_ecb_encrypt(&ac, plain, ctlen);
+
+    uint8_t mac[32];
+    hmac_sha256(key32, sizeof(key32), plain, ctlen, mac);
 
     uint8_t route = (strcasecmp(cfg.meshRoute, "flood") == 0) ? PH_ROUTE_FLOOD
                                                               : PH_ROUTE_DIRECT;
