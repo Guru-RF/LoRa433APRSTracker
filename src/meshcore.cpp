@@ -116,7 +116,7 @@ const uint8_t *MeshCore::publicKey() { return identity.pub; }
 // ============================================================
 
 bool MeshCore::sendAdvert(const TrackerConfig &cfg, float lat, float lon,
-                          uint32_t unixTime) {
+                          uint32_t unixTime, int8_t drive) {
     if (!identityLoaded) return false;
 
     // ---- app_data: flags, position, name ----
@@ -176,6 +176,7 @@ bool MeshCore::sendAdvert(const TrackerConfig &cfg, float lat, float lon,
     // ---- retune, transmit, and always come back to APRS ----
     char err[64];
     if (!TrackerRadio::setMode(RADIO_MODE_MESH, cfg, err, sizeof(err))) return false;
+    TrackerRadio::setDrive(drive);
     bool ok = TrackerRadio::send(frame, 2 + payLen);
     TrackerRadio::setMode(RADIO_MODE_APRS, cfg, err, sizeof(err));
     return ok;

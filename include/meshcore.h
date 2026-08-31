@@ -43,6 +43,12 @@ const uint8_t *publicKey();
 // the radio to the mesh profile, transmits, and returns it to APRS.
 // unixTime must be real (GPS-derived): MeshCore uses the advert
 // timestamp for freshness, so a fabricated one poisons the mesh.
-bool sendAdvert(const TrackerConfig &cfg, float lat, float lon, uint32_t unixTime);
+// `drive` is the dBm to transmit at, chosen by the caller from the same
+// USB-aware rule the APRS path uses. It is explicit rather than inherited:
+// leaving it to whatever the last transmission set makes advert power
+// depend on the order frames happen to go out, and on USB that silently
+// lands in the band where the tracker transmits and nothing decodes it.
+bool sendAdvert(const TrackerConfig &cfg, float lat, float lon,
+                uint32_t unixTime, int8_t drive);
 
 }  // namespace MeshCore

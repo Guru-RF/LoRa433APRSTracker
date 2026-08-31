@@ -202,6 +202,17 @@ static bool txInhibited() {
     return usbInhibit;
 }
 
+// The drive to transmit at right now, for either network. Both paths must
+// use this: APRS setting it and MeshCore inheriting whatever was left over
+// makes advert power depend on the order frames go out, and inheriting
+// rated drive on USB puts the advert in the band that transmits and is
+// never decoded.
+static int8_t currentDrive() {
+    int8_t rated = TrackerRadio::hasModulePa() ? (int8_t)cfg.paDrive
+                                               : (int8_t)cfg.power;
+    return usbHostPresent() ? (int8_t)cfg.usbPaDrive : rated;
+}
+
 // Recompute the host state. Called once per loop and once in setup(),
 // before anything can decide to key the radio.
 static void usbInhibitUpdate() {
@@ -291,9 +302,7 @@ static void loraSendText(const char *text) {
     // Rated drive stalls the PA ramp on USB power; see the USB power
     // budget notes above. Set per frame so unplugging the cable
     // restores full output on the very next beacon.
-    int8_t ratedDrive = TrackerRadio::hasModulePa() ? (int8_t)cfg.paDrive
-                                                    : (int8_t)cfg.power;
-    TrackerRadio::setDrive(usbHostPresent() ? (int8_t)cfg.usbPaDrive : ratedDrive);
+    TrackerRadio::setDrive(currentDrive());
 
     // On a module with its own amplifier the enable line is not
     // optional: if GP2 gates that amplifier's supply, transmitting with
@@ -570,12 +579,13 @@ static void sendMeshAdvert(float lat, float lon) {
 
     digitalWrite(PIN_LED_LORA, HIGH);
 
+    int8_t drive = currentDrive();
     char buf[128];
-    snprintf(buf, sizeof(buf), "TX MESH: %s advert %s @ %.5f,%.5f",
-             cfg.meshNodeType, cfg.meshName, lat, lon);
+    snprintf(buf, sizeof(buf), "TX MESH: %s advert %s @ %.5f,%.5f (%d dBm)",
+             cfg.meshNodeType, cfg.meshName, lat, lon, drive);
     purple(buf);
 
-    if (!MeshCore::sendAdvert(cfg, lat, lon, now)) {
+    if (!MeshCore::sendAdvert(cfg, lat, lon, now, drive)) {
         red("MESH ADVERT FAILED");
     }
 
