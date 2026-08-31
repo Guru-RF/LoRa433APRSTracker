@@ -64,6 +64,19 @@ usbPaDrive=-9
 # Or refuse to transmit at all while a computer is attached.
 usbTxInhibit=false
 
+# --- Battery (thresholds measured on a production vehicle) ---
+# Arms itself only after it has seen the alternator, so a tracker on USB
+# or a bench supply never mistakes the 12.0V ADC floor for a flat battery.
+battProtect=true
+battLowVoltage=1200
+battChargeVoltage=1300
+battPaDrive=10
+
+# --- Parked ---
+# Stationary this long (seconds) and the beacon rate drops. 0 = off.
+sbParkedAfter=14400
+sbParkedRate=1800
+
 # --- Airtime ---
 # At SF12 a frame is ~3.5s on air. Each of these saves ~10%.
 # timestamp off sends '!' instead of '@ddhhmmz'; receivers stamp on

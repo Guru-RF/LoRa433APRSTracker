@@ -90,6 +90,8 @@ JitterLock jitter;
 // Telemetry state
 // ============================================================
 
+static unsigned long parkedSince = 0;
+static bool          parkedSinceValid = false;
 static unsigned long lastCommentSent = 0;
 static bool          commentSent = false;
 static unsigned long lastMeshAdvert = 0;
@@ -224,6 +226,78 @@ static bool txInhibited() {
     return usbInhibit;
 }
 
+// ============================================================
+// Battery protection
+//
+// Thresholds are measured, not assumed - four days of telemetry from a
+// vehicle: alternator 13.62-13.66 V, settled 12.43-12.46 V, decaying
+// ~0.105 V/day to 12.04 V. 13.00 V sits between parked-max and running,
+// so it is an unambiguous "the engine is on"; 12.00 V is about 25% state
+// of charge and is also the floor of the ADC scale.
+//
+// Two things make this safe to leave on by default.
+//
+// It arms itself. Protection does nothing until the tracker has once seen
+// a charging voltage, which proves there is a battery and an alternator
+// there at all. Without that, a tracker on USB or a bench supply reads the
+// 12.0 V floor, looks exactly like a flat battery, and would throttle
+// itself forever for no reason.
+//
+// It does not sample near a transmission. The PA pulls a few hundred
+// milliamps and sags the rail, so a reading taken just after a frame would
+// be of the sag rather than the battery.
+// ============================================================
+
+static const unsigned long BATT_SAMPLE_MS   = 30000;
+static const unsigned long BATT_TX_QUIET_MS = 5000;
+
+static bool          battArmed = false;      // a charging voltage has been seen
+static bool          battLow = false;
+static unsigned long battLastSample = 0;
+static bool          battSampled = false;
+static unsigned long lastTxEnd = 0;
+
+static void battUpdate() {
+    if (!cfg.battProtect || !cfg.voltage) { battLow = false; return; }
+
+    unsigned long now = millis();
+    if (battSampled && (now - battLastSample) < BATT_SAMPLE_MS) return;
+    if (lastTxEnd && (now - lastTxEnd) < BATT_TX_QUIET_MS) return;   // rail still recovering
+    battLastSample = now;
+    battSampled = true;
+
+    int vx100 = (int)(getVoltage() * 100 + 0.5f);
+    bool was = battLow;
+
+    if (vx100 >= cfg.battChargeVoltage) {
+        if (!battArmed) {
+            char buf[80];
+            snprintf(buf, sizeof(buf), "Battery protection armed (charging at %.2fV)",
+                     vx100 / 100.0f);
+            green(buf);
+        }
+        battArmed = true;
+        battLow = false;                       // alternator is running
+    } else if (battArmed && vx100 <= cfg.battLowVoltage) {
+        battLow = true;
+    }
+
+    if (battLow != was) {
+        char buf[96];
+        if (battLow) {
+            snprintf(buf, sizeof(buf), "BATTERY LOW %.2fV - drive reduced to %d dBm",
+                     vx100 / 100.0f, cfg.battPaDrive);
+            red(buf);
+        } else {
+            snprintf(buf, sizeof(buf), "Battery recovered %.2fV - rated drive restored",
+                     vx100 / 100.0f);
+            green(buf);
+        }
+    }
+}
+
+static bool battProtecting() { return battLow; }
+
 // The drive to transmit at right now, for either network. Both paths must
 // use this: APRS setting it and MeshCore inheriting whatever was left over
 // makes advert power depend on the order frames go out, and inheriting
@@ -232,7 +306,13 @@ static bool txInhibited() {
 static int8_t currentDrive() {
     int8_t rated = TrackerRadio::hasModulePa() ? (int8_t)cfg.paDrive
                                                : (int8_t)cfg.power;
-    return usbHostPresent() ? (int8_t)cfg.usbPaDrive : rated;
+    int8_t drive = usbHostPresent() ? (int8_t)cfg.usbPaDrive : rated;
+    // A flat battery wins over anything else: never raise the drive here,
+    // only lower it, so a USB clamp already in force still applies.
+    if (battProtecting() && (int8_t)cfg.battPaDrive < drive) {
+        drive = (int8_t)cfg.battPaDrive;
+    }
+    return drive;
 }
 
 // Recompute the host state. Called once per loop and once in setup(),
@@ -373,6 +453,7 @@ static void loraSendText(const char *text) {
     }
 
     digitalWrite(PIN_LED_LORA, LOW);
+    lastTxEnd = millis();
     watchdog_update();
 }
 
@@ -989,6 +1070,7 @@ void loop() {
     // Recompute the inhibit before anything can decide to key the
     // radio. GPS, the LEDs and the console keep running while it
     // holds - only the transmitter stops.
+    battUpdate();
     usbInhibitUpdate();
     if (usbHostPresent()) {
         usbHostHold();
@@ -1071,12 +1153,29 @@ void loop() {
         return;
     }
 
+    // A tracker left parked does not need a position every three minutes,
+    // and the car's battery is the thing paying for it. After sbParkedAfter
+    // of continuous stillness the stationary rate drops to sbParkedRate.
+    //
+    // Worth about 10% of the average draw, not more: transmitting is only
+    // ~11% of it, and the continuous GPS and MCU load dominates. Measured
+    // decay on a real vehicle is ~0.105 V/day, so this trims rather than
+    // solves that.
+    if (jitter.isStationary()) {
+        if (!parkedSinceValid) { parkedSince = nowMs; parkedSinceValid = true; }
+    } else {
+        parkedSinceValid = false;
+    }
+    bool longParked = cfg.sbParkedAfter > 0 && parkedSinceValid &&
+                      (nowMs - parkedSince) >= (unsigned long)cfg.sbParkedAfter * 1000UL;
+    int slowRate = longParked ? cfg.sbParkedRate : cfg.sbSlowRate;
+
     // Determine whether to beacon
     float sbSpeed = jitter.isStationary() ? 0.0f : (speedKmh >= 0 ? speedKmh : 0);
     bool sendBeacon = startedMoving || sb.shouldBeacon(
         lat, lon, sbSpeed, heading,
         cfg.sbStationarySpeed, cfg.sbSlowSpeed, cfg.sbFastSpeed,
-        cfg.sbSlowRate, cfg.sbFastRate,
+        slowRate, cfg.sbFastRate,
         cfg.sbTurnThreshold, cfg.sbTurnSlope, cfg.sbHeadingFilter);
 
     // Voltage monitoring

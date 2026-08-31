@@ -55,6 +55,26 @@ extern FS FatFS;
 // fewer than 5 bytes buys nothing. Each of these is worth about 10%:
 // the timestamp is 8 bytes and receivers stamp on arrival anyway, and
 // altitude is 9.
+// --- Battery protection ---
+// Thresholds measured on a production vehicle over four days, not taken
+// from a textbook: the alternator holds 13.62-13.66 V, the battery settles
+// at 12.43-12.46 V once parked, and decays ~0.105 V/day to 12.04 V after
+// four days. 13.00 sits cleanly between parked-max and running; 12.00 is
+// about 25% state of charge and is also where the ADC scale bottoms out,
+// so nothing below it is measurable - which is the point. Act before the
+// battery is dead, not after.
+#define DEFAULT_BATT_PROTECT     true
+#define DEFAULT_BATT_LOW_V       1200   // V*100 - below this, back off
+#define DEFAULT_BATT_CHARGE_V    1300   // V*100 - above this, alternator is on
+#define DEFAULT_BATT_PA_DRIVE    10     // drive while the battery is unsupported
+
+// --- Parked ---
+// Stationary this long and the beacon rate drops to sbParkedRate. 0 = off.
+// Worth roughly 10% of the tracker's average draw; the continuous GPS and
+// MCU load dominates, so this is a modest saving rather than a large one.
+#define DEFAULT_SB_PARKED_AFTER  14400  // 4 hours
+#define DEFAULT_SB_PARKED_RATE   1800   // seconds between beacons once parked
+
 #define DEFAULT_APRS_TIMESTAMP true
 #define DEFAULT_APRS_ALTITUDE  true
 // Seconds between comments, not a beacon count. A count means different
@@ -186,6 +206,13 @@ struct TrackerConfig {
     bool   aprsAltitude;
     int    commentInterval;
 
+    bool   battProtect;
+    int    battLowVoltage;
+    int    battChargeVoltage;
+    int    battPaDrive;
+    int    sbParkedAfter;
+    int    sbParkedRate;
+
     bool   meshEnabled;
     char   meshName[24];
     char   meshNodeType[12];
@@ -247,6 +274,12 @@ static void configSetDefaults(TrackerConfig &cfg) {
     cfg.aprsTimestamp = DEFAULT_APRS_TIMESTAMP;
     cfg.aprsAltitude = DEFAULT_APRS_ALTITUDE;
     cfg.commentInterval = DEFAULT_COMMENT_INTERVAL;
+    cfg.battProtect = DEFAULT_BATT_PROTECT;
+    cfg.battLowVoltage = DEFAULT_BATT_LOW_V;
+    cfg.battChargeVoltage = DEFAULT_BATT_CHARGE_V;
+    cfg.battPaDrive = DEFAULT_BATT_PA_DRIVE;
+    cfg.sbParkedAfter = DEFAULT_SB_PARKED_AFTER;
+    cfg.sbParkedRate = DEFAULT_SB_PARKED_RATE;
 
     cfg.meshEnabled = DEFAULT_MESH_ENABLED;
     strncpy(cfg.meshName, DEFAULT_MESH_NAME, sizeof(cfg.meshName));
@@ -358,6 +391,20 @@ static void configSetValue(TrackerConfig &cfg, const char *key, const char *val)
         } else {
             cfg.commentInterval = constrain(atoi(val), 0, 86400);
         }
+    } else if (strcasecmp(key, "battProtect") == 0) {
+        cfg.battProtect = (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0);
+    } else if (strcasecmp(key, "battLowVoltage") == 0) {
+        // Nothing below 1200 is measurable - the ADC scale bottoms out
+        // there - so a lower setting would simply never fire.
+        cfg.battLowVoltage = constrain(atoi(val), 1200, 1350);
+    } else if (strcasecmp(key, "battChargeVoltage") == 0) {
+        cfg.battChargeVoltage = constrain(atoi(val), 1250, 1500);
+    } else if (strcasecmp(key, "battPaDrive") == 0) {
+        cfg.battPaDrive = constrain(atoi(val), -9, 22);
+    } else if (strcasecmp(key, "sbParkedAfter") == 0) {
+        cfg.sbParkedAfter = constrain(atoi(val), 0, 86400);
+    } else if (strcasecmp(key, "sbParkedRate") == 0) {
+        cfg.sbParkedRate = constrain(atoi(val), 60, 3600);
     } else if (strcasecmp(key, "meshEnabled") == 0) {
         cfg.meshEnabled = (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0);
     } else if (strcasecmp(key, "meshName") == 0) {
@@ -486,6 +533,19 @@ static const char *CONFIG_TEMPLATE =
     "# Or refuse to transmit at all while a computer is attached.\n"
     "usbTxInhibit=false\n"
     "\n"
+    "# --- Battery (thresholds measured on a vehicle) ---\n"
+    "# Arms itself only after it has seen the alternator, so a tracker on\n"
+    "# USB or a bench supply never throttles itself.\n"
+    "battProtect=true\n"
+    "battLowVoltage=1200\n"
+    "battChargeVoltage=1300\n"
+    "battPaDrive=10\n"
+    "\n"
+    "# --- Parked ---\n"
+    "# Stationary this long (s) and the beacon rate drops. 0 = off.\n"
+    "sbParkedAfter=14400\n"
+    "sbParkedRate=1800\n"
+    "\n"
     "# --- Airtime ---\n"
     "# At SF12 a frame is ~3.5s on air. Each of these saves ~10%.\n"
     "# timestamp off sends '!' instead of '@ddhhmmz'; receivers stamp\n"
@@ -556,6 +616,19 @@ static bool configCreateDefault() {
     f.println("usbPaDrive=-9");
     f.println("# Or refuse to transmit at all while a computer is attached.");
     f.println("usbTxInhibit=false");
+    f.println("");
+    f.println("# --- Battery (thresholds measured on a vehicle) ---");
+    f.println("# Arms only after it has seen the alternator, so a tracker on");
+    f.println("# USB or a bench supply never throttles itself.");
+    f.println("battProtect=true");
+    f.println("battLowVoltage=1200");
+    f.println("battChargeVoltage=1300");
+    f.println("battPaDrive=10");
+    f.println("");
+    f.println("# --- Parked ---");
+    f.println("# Stationary this long (s) and the beacon rate drops. 0 = off.");
+    f.println("sbParkedAfter=14400");
+    f.println("sbParkedRate=1800");
     f.println("");
     f.println("# --- Airtime ---");
     f.println("# At SF12 a frame is ~3.5s on air. Each of these saves ~10%.");

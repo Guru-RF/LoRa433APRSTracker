@@ -97,6 +97,39 @@ says so on the console and winks the power LED once every 5 seconds. The LoRa
 LED is left alone either way, so a blinking LoRa LED always means the
 transmitter is keyed.
 
+### Battery protection
+
+A tracker wired to a car's battery keeps drawing while the car is parked. Two
+features reduce that, both configurable and both with thresholds taken from
+four days of telemetry on a real vehicle rather than from a textbook - that car
+holds **13.62-13.66 V** with the alternator running, settles to **12.43-12.46 V**
+parked, and decays about **0.105 V/day**.
+
+- **battProtect** - drop to `battPaDrive` when the battery falls to
+  `battLowVoltage`, and restore when it rises past `battChargeVoltage`
+  (`true`/`false`, default `true`)
+- **battLowVoltage** - hundredths of a volt, default `1200` (12.00 V, roughly
+  25% charge). Nothing lower is measurable: the ADC bottoms out at 12.00 V,
+  deliberately, because the point is to act well before a battery is flat.
+- **battChargeVoltage** - default `1300` (13.00 V). Sits between parked-max and
+  alternator-running, so it is an unambiguous "the engine is on".
+- **battPaDrive** - drive while the battery is unsupported, default `10`
+
+It **arms itself**: nothing happens until the tracker has once seen a charging
+voltage, which proves a battery and alternator are actually present. A tracker
+on USB or a bench supply reads the 12.00 V floor, which looks exactly like a
+flat battery, and would otherwise throttle itself forever for no reason. It
+also skips readings taken within 5 s of a transmission, since the amplifier
+sags the rail while it keys.
+
+- **sbParkedAfter** - seconds stationary before the beacon rate drops, default
+  `14400` (4 hours); `0` disables it
+- **sbParkedRate** - beacon interval once parked, default `1800`
+
+Be realistic about what the parked rate saves: transmitting is only about 11%
+of the tracker's average draw, so slowing it is worth roughly 10%. The
+continuous GPS and MCU load is what dominates.
+
 ### Airtime
 
 At SF12 an 82-byte frame is **3.45 seconds** on the air, so beacon rates that
