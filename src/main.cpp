@@ -1127,15 +1127,25 @@ void loop() {
 
         cpos += snprintf(comment + cpos, sizeof(comment) - cpos, "|");
 
-        if (altM >= 0) {
+        if (altM >= 0 && cfg.aprsAltitude) {
             int feet = (int)(altM * 3.2808399f);
             cpos += snprintf(comment + cpos, sizeof(comment) - cpos, "/A=%06d", feet);
         }
 
         // Build full APRS frame
         char frame[300];
-        snprintf(frame, sizeof(frame), "%s>APRFGT:@%s%s%s",
-                 cfg.callsign, ts, aprsPos, comment);
+        // '@' carries the timestamp and claims message capability; '!' is
+        // real-time with neither. This tracker cannot receive, so '!' is the
+        // honest form as well as the shorter one - the same choice the
+        // RF.Guru iGate makes - and it saves 8 bytes, about 10% of the air
+        // time, because receivers stamp on arrival anyway.
+        if (cfg.aprsTimestamp) {
+            snprintf(frame, sizeof(frame), "%s>APRFGT:@%s%s%s",
+                     cfg.callsign, ts, aprsPos, comment);
+        } else {
+            snprintf(frame, sizeof(frame), "%s>APRFGT:!%s%s",
+                     cfg.callsign, aprsPos, comment);
+        }
 
         char buf[350];
         snprintf(buf, sizeof(buf), "TX: %s", frame);

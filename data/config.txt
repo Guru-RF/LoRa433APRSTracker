@@ -64,6 +64,13 @@ usbPaDrive=-9
 # Or refuse to transmit at all while a computer is attached.
 usbTxInhibit=false
 
+# --- Airtime ---
+# At SF12 a frame is ~3.5s on air. Each of these saves ~10%.
+# timestamp off sends '!' instead of '@ddhhmmz'; receivers stamp on
+# arrival anyway, and this tracker cannot receive messages.
+aprsTimestamp=true
+aprsAltitude=true
+
 # --- MeshCore (IARU R1 ham profile, 70cm) ---
 # Mints an Ed25519 identity in /meshid.bin on first enable.
 meshEnabled=false

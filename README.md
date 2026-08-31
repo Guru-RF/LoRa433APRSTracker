@@ -97,6 +97,26 @@ says so on the console and winks the power LED once every 5 seconds. The LoRa
 LED is left alone either way, so a blinking LoRa LED always means the
 transmitter is keyed.
 
+### Airtime
+
+At SF12 an 82-byte frame is **3.45 seconds** on the air, so beacon rates that
+are unremarkable on 1200 baud AX.25 are expensive here. The SmartBeacon
+profiles use `fastRate` values chosen for that: 60 s for `car` rather than the
+classic 15 s, which is 5.7% of the channel at motorway speed instead of 23%.
+Corner pegging still fires on turns, so little tracking detail is lost.
+
+Two frame fields can be dropped to save about 10% each. Both default to on, so
+the firmware sends what it always has unless you change it:
+
+- **aprsTimestamp** - `false` sends `!` (real-time, no timestamp) instead of
+  `@ddhhmmz`. Receivers stamp on arrival anyway, and this tracker cannot
+  receive messages, so `!` is the more honest form as well as the shorter one.
+- **aprsAltitude** - `false` drops the `/A=` field.
+
+Trimming is only worth doing in whole 5-byte steps: at SF12 the payload
+quantises into 164 ms chunks, so shaving one to four bytes saves nothing.
+A shorter `comment` is the other easy win.
+
 ### MeshCore
 
 The tracker can also announce itself on the IARU R1 amateur MeshCore channel -

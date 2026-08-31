@@ -47,6 +47,17 @@ extern FS FatFS;
 // --- MeshCore (IARU R1 ham profile) ---
 // Off until the operator provisions it: enabling mints an Ed25519
 // identity and puts the station on a shared network under its own name.
+// Frame content. Both default to what the firmware has always sent, so a
+// firmware update does not silently change what deployed trackers put on
+// the air - turning either off is the operator's decision.
+//
+// At SF12 the payload quantises in 5-byte steps of 164 ms, so trimming
+// fewer than 5 bytes buys nothing. Each of these is worth about 10%:
+// the timestamp is 8 bytes and receivers stamp on arrival anyway, and
+// altitude is 9.
+#define DEFAULT_APRS_TIMESTAMP true
+#define DEFAULT_APRS_ALTITUDE  true
+
 #define DEFAULT_MESH_ENABLED   false
 #define DEFAULT_MESH_NAME      "NOCALL"
 // chat | repeater | room | sensor. A repeater gates chat and repeater
@@ -116,14 +127,25 @@ struct SBPreset {
     bool   headingFilter;
 };
 
+// fastRate is deliberately far slower than classic SmartBeaconing.
+//
+// Those constants come from 1200 baud AX.25, where a beacon is about half
+// a second and a 15 s interval costs ~3% of the channel. This is SF12: an
+// 82-byte frame is 3.45 s on air, so the same 15 s is **23%** of a shared
+// channel from one tracker. Two of them on a motorway and half the band is
+// gone.
+//
+// 60 s at 60 km/h is a position every kilometre, and corner pegging still
+// fires on turns regardless - which is what it exists for - so very little
+// tracking fidelity is lost for a fourfold cut in airtime.
 static const SBPreset PRESET_CAR = {
-    15, 180, 60, 10, 1.0f, 100, 3, 30, 5.0f, true
+    60, 180, 60, 10, 1.0f, 100, 3, 30, 5.0f, true
 };
 static const SBPreset PRESET_BIKE = {
-    25, 240, 25, 5, 0.6f, 100, 3, 22, 4.0f, true
+    90, 240, 25, 5, 0.6f, 100, 3, 22, 4.0f, true
 };
 static const SBPreset PRESET_HIKER = {
-    40, 360, 10, 1, 0.4f, 100, 3, 18, 3.0f, true
+    120, 360, 10, 1, 0.4f, 100, 3, 18, 3.0f, true
 };
 
 struct TrackerConfig {
@@ -146,6 +168,9 @@ struct TrackerConfig {
     int    usbPaDrive;
 
     // MeshCore
+    bool   aprsTimestamp;
+    bool   aprsAltitude;
+
     bool   meshEnabled;
     char   meshName[24];
     char   meshNodeType[12];
@@ -203,6 +228,9 @@ static void configSetDefaults(TrackerConfig &cfg) {
     cfg.fullDebug = DEFAULT_FULL_DEBUG;
     cfg.usbTxInhibit = DEFAULT_USB_TX_INHIBIT;
     cfg.usbPaDrive = DEFAULT_USB_PA_DRIVE;
+
+    cfg.aprsTimestamp = DEFAULT_APRS_TIMESTAMP;
+    cfg.aprsAltitude = DEFAULT_APRS_ALTITUDE;
 
     cfg.meshEnabled = DEFAULT_MESH_ENABLED;
     strncpy(cfg.meshName, DEFAULT_MESH_NAME, sizeof(cfg.meshName));
@@ -301,6 +329,10 @@ static void configSetValue(TrackerConfig &cfg, const char *key, const char *val)
         cfg.usbTxInhibit = (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0);
     } else if (strcasecmp(key, "usbPaDrive") == 0) {
         cfg.usbPaDrive = constrain(atoi(val), -9, USB_PA_DRIVE_MAX);
+    } else if (strcasecmp(key, "aprsTimestamp") == 0) {
+        cfg.aprsTimestamp = (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0);
+    } else if (strcasecmp(key, "aprsAltitude") == 0) {
+        cfg.aprsAltitude = (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0);
     } else if (strcasecmp(key, "meshEnabled") == 0) {
         cfg.meshEnabled = (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0);
     } else if (strcasecmp(key, "meshName") == 0) {
@@ -418,6 +450,13 @@ static const char *CONFIG_TEMPLATE =
     "# Or refuse to transmit at all while a computer is attached.\n"
     "usbTxInhibit=false\n"
     "\n"
+    "# --- Airtime ---\n"
+    "# At SF12 a frame is ~3.5s on air. Each of these saves ~10%.\n"
+    "# timestamp off sends '!' instead of '@ddhhmmz'; receivers stamp\n"
+    "# on arrival anyway, and this tracker cannot receive messages.\n"
+    "aprsTimestamp=true\n"
+    "aprsAltitude=true\n"
+    "\n"
     "# --- MeshCore (IARU R1 ham profile, 70cm) ---\n"
     "# Mints an Ed25519 identity in /meshid.bin on first enable.\n"
     "meshEnabled=false\n"
@@ -479,6 +518,12 @@ static bool configCreateDefault() {
     f.println("usbPaDrive=-9");
     f.println("# Or refuse to transmit at all while a computer is attached.");
     f.println("usbTxInhibit=false");
+    f.println("");
+    f.println("# --- Airtime ---");
+    f.println("# At SF12 a frame is ~3.5s on air. Each of these saves ~10%.");
+    f.println("# timestamp off sends '!' instead of '@ddhhmmz'.");
+    f.println("aprsTimestamp=true");
+    f.println("aprsAltitude=true");
     f.println("");
     f.println("# --- MeshCore (IARU R1 ham profile, 70cm) ---");
     f.println("# Mints an Ed25519 identity in /meshid.bin on first enable.");
