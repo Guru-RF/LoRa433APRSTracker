@@ -90,7 +90,8 @@ JitterLock jitter;
 // Telemetry state
 // ============================================================
 
-static uint16_t      beaconCount = 0;
+static unsigned long lastCommentSent = 0;
+static bool          commentSent = false;
 static unsigned long lastMeshAdvert = 0;
 static bool          meshAdvertSent = false;
 
@@ -1088,11 +1089,16 @@ void loop() {
         // Build comment with telemetry
         // aprs.fi keeps the last comment it saw and only drops it after
         // seven days of comment-less packets, so sending it on every beacon
-        // buys nothing - and it is a third of the frame. Beacon 1 always
-        // carries it so a receiver has it from the start.
-        beaconCount++;
-        bool withComment = (cfg.commentInterval <= 1) ||
-                           (beaconCount % (uint16_t)cfg.commentInterval == 1);
+        // buys nothing - and it is a third of the frame. Timed rather than
+        // counted, so the gap does not shrink to nothing at speed. The
+        // first beacon of a session always carries it.
+        bool withComment = (cfg.commentInterval <= 0) || !commentSent ||
+                           (nowMs - lastCommentSent) >=
+                               (unsigned long)cfg.commentInterval * 1000UL;
+        if (withComment) {
+            lastCommentSent = nowMs;
+            commentSent = true;
+        }
 
         char comment[128];
         int cpos = 0;

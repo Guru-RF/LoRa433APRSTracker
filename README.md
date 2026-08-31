@@ -113,13 +113,14 @@ the firmware sends what it always has unless you change it:
   receive messages, so `!` is the more honest form as well as the shorter one.
 - **aprsAltitude** - `false` drops the `/A=` field.
 
-- **commentInterval** - send the comment on every Nth beacon (default `1`,
-  every beacon). aprs.fi keeps the last comment it received and, per its
-  author, only forgets it "if you still transmit packets without a comment
-  after 7 days" - so a station beaconing every 3 minutes can send it every
-  6th and stay far inside that. The comment is a third of the frame, which
-  makes this the largest single saving available. Other consumers may not
-  cache the way aprs.fi does, which is why it defaults to every beacon.
+- **commentInterval** - seconds between comments (default `1800`, half an
+  hour), or `always` to send it on every beacon. aprs.fi keeps the last comment it
+  received and, per its author, only forgets it "if you still transmit
+  packets without a comment after 7 days", so half an hour has a 336x
+  margin. The comment is a third of the frame, so this recovers about 30%
+  of the airtime; an hour instead of half buys only a further 2%. It is
+  seconds rather than a beacon count deliberately - a count would shrink
+  the gap to a few minutes at speed, which is when airtime is scarcest.
 
 Altitude is free while stationary. The compressed position's `cs` field
 carries either course/speed or altitude, and APRS 1.0.1 (chapter 9) says
