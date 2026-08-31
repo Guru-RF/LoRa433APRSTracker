@@ -301,12 +301,21 @@ static bool oscillatorWorks(int tcxoVoltCode, float freqMHz) {
 // Sets *ok false when no clock configuration produced a running
 // oscillator and a locked PLL, which is worth saying out loud rather
 // than silently falling back to the crystal setting.
+// Each attempt resets the chip, calibrates and locks the PLL, so the sweep
+// costs a few hundred milliseconds. That fits inside the watchdog setup()
+// now arms before this runs, but feed it anyway rather than depend on the
+// arithmetic staying true if a voltage is ever added to the list.
 static float probeTcxoVoltage(float freqMHz, bool *ok) {
     *ok = true;
+    watchdog_update();
     if (oscillatorWorks(-1, freqMHz))   return 0.0f;   // plain crystal
+    watchdog_update();
     if (oscillatorWorks(0x02, freqMHz)) return 1.8f;
+    watchdog_update();
     if (oscillatorWorks(0x07, freqMHz)) return 3.3f;
+    watchdog_update();
     if (oscillatorWorks(0x06, freqMHz)) return 3.0f;
+    watchdog_update();
     if (oscillatorWorks(0x05, freqMHz)) return 2.7f;
     *ok = false;
     return 0.0f;
@@ -356,6 +365,7 @@ static bool ldroNeeded() {
 }
 
 bool TrackerRadio::begin(const TrackerConfig &cfg, char *err, size_t errLen) {
+    watchdog_update();
     rawBegin();
 
     activeChip = resolveChip(cfg);

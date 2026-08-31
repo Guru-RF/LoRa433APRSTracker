@@ -95,6 +95,7 @@ static bool          commentSent = false;
 static unsigned long lastMeshAdvert = 0;
 static bool          meshAdvertSent = false;
 
+static const uint16_t SEQ_COMMIT_EVERY = 64;
 static uint16_t sequence = 0;
 static unsigned long lastDebugPrint = 0;
 static unsigned long lastVoltageWarning = 0;
@@ -638,7 +639,22 @@ static bool usbDriveReady(uint32_t) {
 // ============================================================
 
 void setup() {
-    // No watchdog during init - enable at end of setup()
+    // Arm the watchdog before anything that can fail, not after.
+    //
+    // Three init paths end in `while (true)` - a failed FatFS mount, a
+    // failed radio bring-up, and the post-reset_usb_boot spin. Unarmed,
+    // each is a tracker that sits with a lit power LED and is dead until
+    // someone physically repowers it. That is the same brick class the
+    // watchdog was moved for once already; the reasoning was applied to
+    // the metadata burst and not to the halts above it. A transient SPI
+    // or oscillator fault on a cold winter start is exactly the kind of
+    // thing that should reboot and retry rather than latch.
+    //
+    // 8 s here rather than the 5 s used in flight: the init path has
+    // several fixed multi-second delays (GPS reset, USB re-enumeration,
+    // the GPS baud sweep) and this leaves margin without needing a feed
+    // inside each one. It is tightened to 5 s before the first frame.
+    watchdog_enable(8000, true);
 
     // LEDs
     pinMode(PIN_LED_PWR, OUTPUT);
@@ -660,12 +676,15 @@ void setup() {
     pinMode(PIN_GPS_RST, OUTPUT);
     digitalWrite(PIN_GPS_RST, LOW);
     delay(1000);
+    watchdog_update();
     digitalWrite(PIN_GPS_RST, HIGH);
     delay(1000);
+    watchdog_update();
 
     // USB Serial
     Serial.begin(115200);
     delay(2000);
+    watchdog_update();
 
     Serial.print("\r\n");
 
@@ -675,7 +694,7 @@ void setup() {
 
     // Init FAT filesystem and do all file ops BEFORE starting USB drive
     if (!FatFS.begin()) {
-        red("FatFS init failed!");
+        red("FatFS init failed! (watchdog will reboot and retry)");
         while (true) delay(1000);
     }
     fatfs::f_setlabel("APRSTRKR");
@@ -732,6 +751,7 @@ void setup() {
     FatFSUSB.onUnplug([](uint32_t) { rp2040.reboot(); });
     FatFSUSB.driveReady(usbDriveReady);
     FatFSUSB.begin();
+    watchdog_update();
 
     // Starting the mass-storage interface re-enumerates the USB device,
     // which drops the host's serial connection for about a second.
@@ -739,8 +759,9 @@ void setup() {
     // the entire radio detection report. Wait for the host to come back
     // before continuing. Bounded, because on a charger there is no host.
     unsigned long usbWait = millis();
-    while (!Serial && (millis() - usbWait) < 2500) delay(10);
+    while (!Serial && (millis() - usbWait) < 2500) { delay(10); watchdog_update(); }
     delay(250);
+    watchdog_update();
 
     green("USB mass storage active");
 
@@ -765,10 +786,14 @@ void setup() {
     analogReadResolution(16);
 
     // EEPROM for sequence persistence
+    // The sequence counter is only persisted every SEQ_COMMIT_EVERY
+    // beacons - see the beacon block - so the stored value can be up to
+    // that far behind. Resume a whole block past it rather than replaying
+    // numbers already on the air.
     EEPROM.begin(4);
     uint16_t stored = EEPROM.read(0) | (EEPROM.read(1) << 8);
     if (stored > 0 && stored <= 8191) {
-        sequence = stored;
+        sequence = (uint16_t)((stored + SEQ_COMMIT_EVERY) % 8192);
     }
     snprintf(cfgMsg, sizeof(cfgMsg), "Sequence start at: %d", sequence);
     yellow(cfgMsg);
@@ -779,7 +804,7 @@ void setup() {
     char radioErr[96] = "";
     if (!TrackerRadio::begin(cfg, radioErr, sizeof(radioErr))) {
         red(radioErr);
-        red("LoRa INIT ERROR");
+        red("LoRa INIT ERROR (watchdog will reboot and retry)");
         while (true) { delay(1000); }
     }
 
@@ -855,6 +880,7 @@ void setup() {
         yellow("Init I2C sensors");
         digitalWrite(PIN_I2C_PWR, HIGH);
         delay(500);
+        watchdog_update();
 
         Wire1.setSDA(PIN_I2C_SDA);
         Wire1.setSCL(PIN_I2C_SCL);
@@ -1101,10 +1127,20 @@ void loop() {
                      parked ? altFt : -1.0f);
 
         // Sequence
+        // EEPROM.commit() erases a 4 KB flash sector, and doing that on
+        // every beacon is the heaviest wear in the firmware: driving at
+        // fastRate that is ~1440 erases a day, reaching the 100k-cycle
+        // datasheet minimum in about ten weeks. All that is being kept is
+        // an APRS telemetry sequence number whose only cost on loss is
+        // that telemetry restarts, so it is persisted a block at a time
+        // and resumed a block ahead - 64x the endurance, same behaviour
+        // on the air.
         sequence = (sequence + 1) % 8192;
-        EEPROM.write(0, sequence & 0xFF);
-        EEPROM.write(1, (sequence >> 8) & 0xFF);
-        EEPROM.commit();
+        if ((sequence % SEQ_COMMIT_EVERY) == 0) {
+            EEPROM.write(0, sequence & 0xFF);
+            EEPROM.write(1, (sequence >> 8) & 0xFF);
+            EEPROM.commit();
+        }
 
         // Build comment with telemetry
         // aprs.fi keeps the last comment it saw and only drops it after
@@ -1184,8 +1220,12 @@ void loop() {
         // honest form as well as the shorter one - the same choice the
         // RF.Guru iGate makes - and it saves 8 bytes, about 10% of the air
         // time, because receivers stamp on arrival anyway.
+        // '/' is timestamp-without-messaging; '@' is timestamp-with. This
+        // tracker has no receive path at all, so '@' advertises a
+        // capability it does not have - the same reason the untimestamped
+        // branch uses '!' rather than '='.
         if (cfg.aprsTimestamp) {
-            snprintf(frame, sizeof(frame), "%s>APRFGT:@%s%s%s",
+            snprintf(frame, sizeof(frame), "%s>APRFGT:/%s%s%s",
                      cfg.callsign, ts, aprsPos, comment);
         } else {
             snprintf(frame, sizeof(frame), "%s>APRFGT:!%s%s",
