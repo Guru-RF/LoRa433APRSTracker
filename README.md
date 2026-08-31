@@ -145,6 +145,34 @@ Be realistic about what the parked rate saves: transmitting is only about 11%
 of the tracker's average draw, so slowing it is worth roughly 10%. The
 continuous GPS and MCU load is what dominates.
 
+### Alerts
+
+A tracker in a vehicle has no console, so the events worth knowing about are
+queued and put on the air instead - to a MeshCore public channel, as an APRS
+message, or both. Off by default: it costs airtime, and a shared channel is no
+place for chatter nobody asked for.
+
+- **alertChannel** - MeshCore public channel, e.g. `#mbox`. The key is derived
+  from the name (`SHA256("#mbox")[0..15]`), so there is nothing to exchange -
+  anyone with the name can read it, which is the point on an amateur network
+  where obscuring meaning is not permitted anyway.
+- **alertMention** - prefixed to the text, e.g. `@OR7F`
+- **alertAprsCall** - callsign to send an APRS message to, e.g. `OR7F-1`
+- **alertInterval** - minimum seconds between alerts, default `60`
+
+What gets sent: the supply moving, the battery falling and recovering,
+protection arming, and a line at every boot saying whether it was a power-on or
+a **watchdog reset** - which is otherwise impossible to know about a tracker
+sitting in a car.
+
+They are queued rather than sent inline for two reasons. A transmission cannot
+happen inside the event that caused it - the supply-moved alert fires exactly
+when the rule says do not transmit - and queueing bounds the airtime to one
+alert per `alertInterval`, oldest first, on a loop pass of its own so a retune
+never lands between the frames of a beacon. The queue holds six and drops the
+oldest when full: a tracker generating six alerts is having an interesting
+time, and the newest state is the one worth hearing.
+
 ### Airtime
 
 At SF12 an 82-byte frame is **3.45 seconds** on the air, so beacon rates that

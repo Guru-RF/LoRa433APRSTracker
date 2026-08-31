@@ -15,6 +15,9 @@
 
 extern "C" {
 #include "ed_25519.h"
+#include "aes128.h"
+#include "sha256.h"
+#include "hmac_sha256.h"
 }
 
 // ============================================================
@@ -25,6 +28,7 @@ extern "C" {
 static const uint8_t PH_ROUTE_FLOOD        = 0x01;
 static const uint8_t PH_ROUTE_DIRECT       = 0x02;
 static const uint8_t PH_TYPE_ADVERT        = 0x04;
+static const uint8_t PH_TYPE_GRP_TXT       = 0x05;
 static const uint8_t PH_TYPE_SHIFT         = 2;
 
 // app_data flag bits. Only LATLON and NAME are used - feat1/feat2 are
@@ -203,6 +207,84 @@ bool MeshCore::sendAdvert(const TrackerConfig &cfg, float lat, float lon,
         // The radio is now on an unknown profile and APRS is about to use
         // it. Say so loudly; setMode has left its cache invalid, so the
         // next attempt reprograms from scratch rather than trusting it.
+        Serial.printf("\x1b[1;5;31mRADIO STUCK OFF-PROFILE: %s\x1b[0m\r\n", err);
+    }
+    return ok;
+}
+
+// ============================================================
+// Public channel group text
+//
+// Wire format taken from channel_build_txt() in the repeater's
+// src/mesh.c, so what this encrypts is decrypted by exactly the code that
+// receives it:
+//
+//   key      = SHA256("#name")[0..15]
+//   selector = SHA256(key, 16)[0]
+//   plain    = [ts u32 LE][txt_type 0]["sender: text"], zero-padded to 16
+//   payload  = [selector][HMAC-SHA256(key32, plain)[0..1]][AES-128-ECB(key, plain)]
+//
+// The key asymmetry is deliberate and easy to get wrong: AES takes the
+// 16-byte key, the HMAC takes it zero-padded to 32.
+// ============================================================
+
+bool MeshCore::sendChannelText(const TrackerConfig &cfg, const char *channel,
+                               const char *text, uint32_t unixTime, int8_t drive) {
+    if (!identityLoaded || !channel || !channel[0] || !text || !text[0]) return false;
+
+    uint8_t key32[32];
+    memset(key32, 0, sizeof(key32));
+    SHA256_CTX c;
+    uint8_t digest[SHA256_BLOCK_SIZE];
+    sha256_init(&c);
+    sha256_update(&c, (const uint8_t *)channel, strlen(channel));
+    sha256_final(&c, digest);
+    memcpy(key32, digest, 16);                 // channel key = SHA256(name)[0..15]
+
+    sha256_init(&c);
+    sha256_update(&c, key32, 16);              // selector hashes the raw 16, not the pad
+    sha256_final(&c, digest);
+    uint8_t selector = digest[0];
+
+    uint8_t plain[160];
+    size_t i = 0;
+    memcpy(plain, &unixTime, 4); i = 4;
+    plain[i++] = 0;                            // txt_type = plain
+    int n = snprintf((char *)&plain[i], sizeof(plain) - i - 16, "%s: %s",
+                     cfg.meshName, text);
+    if (n < 0) return false;
+    i += (size_t)n;                            // no NUL, matching MeshCore
+    size_t ctlen = (i + 15) & ~(size_t)15;
+    if (ctlen == 0) ctlen = 16;
+    while (i < ctlen) plain[i++] = 0;
+
+    uint8_t mac[32];
+    hmac_sha256(key32, sizeof(key32), plain, ctlen, mac);
+
+    aes128_ctx_t ac;
+    aes128_init(&ac, key32);
+    aes128_ecb_encrypt(&ac, plain, ctlen);
+
+    uint8_t route = (strcasecmp(cfg.meshRoute, "flood") == 0) ? PH_ROUTE_FLOOD
+                                                              : PH_ROUTE_DIRECT;
+    uint8_t frame[2 + 3 + sizeof(plain)];
+    frame[0] = (uint8_t)(route | (PH_TYPE_GRP_TXT << PH_TYPE_SHIFT));
+    frame[1] = 0x00;                           // empty path
+    frame[2] = selector;
+    frame[3] = mac[0];
+    frame[4] = mac[1];
+    memcpy(frame + 5, plain, ctlen);
+
+    char err[64];
+    bool ok = false;
+    if (TrackerRadio::setMode(RADIO_MODE_MESH, cfg, err, sizeof(err))) {
+        TrackerRadio::setDrive(drive);
+        bool needPa = cfg.hasPa || TrackerRadio::hasModulePa();
+        if (needPa) { digitalWrite(PIN_PA, HIGH); delay(250); watchdog_update(); }
+        ok = TrackerRadio::send(frame, 5 + ctlen);
+        if (needPa) { delay(100); digitalWrite(PIN_PA, LOW); }
+    }
+    if (!TrackerRadio::setMode(RADIO_MODE_APRS, cfg, err, sizeof(err))) {
         Serial.printf("\x1b[1;5;31mRADIO STUCK OFF-PROFILE: %s\x1b[0m\r\n", err);
     }
     return ok;

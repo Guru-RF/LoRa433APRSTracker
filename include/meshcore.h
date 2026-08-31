@@ -51,4 +51,15 @@ const uint8_t *publicKey();
 bool sendAdvert(const TrackerConfig &cfg, float lat, float lon,
                 uint32_t unixTime, int8_t drive);
 
+// Send one line of text to a MeshCore public channel, as a group message
+// the way a phone client would. The channel key is derived from its name
+// (SHA256("#mbox")[0..15]), so no key exchange is needed - anyone with the
+// name can read it, which is the point on an amateur network where
+// obscuring meaning is not allowed anyway.
+//
+// `drive` is chosen by the caller from the same rule the beacon uses.
+// Returns false if MeshCore is not configured or the radio refused.
+bool sendChannelText(const TrackerConfig &cfg, const char *channel,
+                     const char *text, uint32_t unixTime, int8_t drive);
+
 }  // namespace MeshCore

@@ -90,6 +90,17 @@ extern FS FatFS;
 // Stationary this long and the beacon rate drops to sbParkedRate. 0 = off.
 // Worth roughly 10% of the tracker's average draw; the continuous GPS and
 // MCU load dominates, so this is a modest saving rather than a large one.
+// --- Alerts ---
+// A tracker in a vehicle has no console, so the diagnostics that matter -
+// the supply moving, the battery falling, protection arming - are queued
+// and sent on the air instead. Both destinations are optional and both are
+// empty by default: this costs airtime, and a shared channel is not the
+// place for chatter nobody asked for.
+#define DEFAULT_ALERT_CHANNEL  ""     // MeshCore public channel, e.g. #mbox
+#define DEFAULT_ALERT_MENTION  ""     // prefixed to the text, e.g. @OR7F
+#define DEFAULT_ALERT_APRS     ""     // APRS callsign to message, e.g. OR7F-1
+#define DEFAULT_ALERT_INTERVAL 60     // minimum seconds between alerts
+
 #define DEFAULT_SB_PARKED_AFTER  14400  // 4 hours
 #define DEFAULT_SB_PARKED_RATE   1800   // seconds between beacons once parked
 
@@ -231,6 +242,10 @@ struct TrackerConfig {
     int    battStartDelay;
     int    battStepVolts;
     int    battSettle;
+    char   alertChannel[20];
+    char   alertMention[16];
+    char   alertAprsCall[16];
+    int    alertInterval;
     int    sbParkedAfter;
     int    sbParkedRate;
 
@@ -302,6 +317,10 @@ static void configSetDefaults(TrackerConfig &cfg) {
     cfg.battStartDelay = DEFAULT_BATT_START_DELAY;
     cfg.battStepVolts = DEFAULT_BATT_STEP_V;
     cfg.battSettle = DEFAULT_BATT_SETTLE;
+    strncpy(cfg.alertChannel, DEFAULT_ALERT_CHANNEL, sizeof(cfg.alertChannel));
+    strncpy(cfg.alertMention, DEFAULT_ALERT_MENTION, sizeof(cfg.alertMention));
+    strncpy(cfg.alertAprsCall, DEFAULT_ALERT_APRS, sizeof(cfg.alertAprsCall));
+    cfg.alertInterval = DEFAULT_ALERT_INTERVAL;
     cfg.sbParkedAfter = DEFAULT_SB_PARKED_AFTER;
     cfg.sbParkedRate = DEFAULT_SB_PARKED_RATE;
 
@@ -431,6 +450,15 @@ static void configSetValue(TrackerConfig &cfg, const char *key, const char *val)
         cfg.battStepVolts = constrain(atoi(val), 0, 300);
     } else if (strcasecmp(key, "battSettle") == 0) {
         cfg.battSettle = constrain(atoi(val), 0, 60);
+    } else if (strcasecmp(key, "alertChannel") == 0) {
+        strncpy(cfg.alertChannel, val, sizeof(cfg.alertChannel) - 1);
+    } else if (strcasecmp(key, "alertMention") == 0) {
+        strncpy(cfg.alertMention, val, sizeof(cfg.alertMention) - 1);
+    } else if (strcasecmp(key, "alertAprsCall") == 0) {
+        strncpy(cfg.alertAprsCall, val, sizeof(cfg.alertAprsCall) - 1);
+        for (char *q = cfg.alertAprsCall; *q; q++) *q = toupper(*q);
+    } else if (strcasecmp(key, "alertInterval") == 0) {
+        cfg.alertInterval = constrain(atoi(val), 10, 3600);
     } else if (strcasecmp(key, "sbParkedAfter") == 0) {
         cfg.sbParkedAfter = constrain(atoi(val), 0, 86400);
     } else if (strcasecmp(key, "sbParkedRate") == 0) {
@@ -576,6 +604,13 @@ static const char *CONFIG_TEMPLATE =
     "battStepVolts=30\n"
     "battSettle=5\n"
     "\n"
+    "# --- Alerts (no console in a car - put the diagnostics on the air) ---\n"
+    "# Both empty = off. alertChannel is a MeshCore public channel.\n"
+    "alertChannel=\n"
+    "alertMention=\n"
+    "alertAprsCall=\n"
+    "alertInterval=60\n"
+    "\n"
     "# --- Parked ---\n"
     "# Stationary this long (s) and the beacon rate drops. 0 = off.\n"
     "sbParkedAfter=14400\n"
@@ -664,6 +699,13 @@ static bool configCreateDefault() {
     f.println("# hold off transmitting while the rail is moving (crank dip and rise)");
     f.println("battStepVolts=30");
     f.println("battSettle=5");
+    f.println("");
+    f.println("# --- Alerts (no console in a car - put the diagnostics on the air) ---");
+    f.println("# Both empty = off. alertChannel is a MeshCore public channel.");
+    f.println("alertChannel=");
+    f.println("alertMention=");
+    f.println("alertAprsCall=");
+    f.println("alertInterval=60");
     f.println("");
     f.println("# --- Parked ---");
     f.println("# Stationary this long (s) and the beacon rate drops. 0 = off.");

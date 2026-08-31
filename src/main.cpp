@@ -274,6 +274,8 @@ static int           battPrevV = 0;
 static unsigned long railSettledAt = 0;   // transmissions held off until this
 static unsigned long lastTxEnd = 0;
 
+static void alertQueue(const char *text);   // defined with the queue below
+
 // True while the supply is still settling after a step - cranking, a big
 // load switching, anything that moves the rail. Nothing goes on the air
 // then: the amplifier wants a few hundred milliamps and a rail that is
@@ -319,6 +321,7 @@ static void battUpdate() {
                          "Supply moved %.2fV to %.2fV - off the air for %ds",
                          battPrevV / 100.0f, vx100 / 100.0f, cfg.battSettle);
                 yellow(buf);
+                alertQueue(buf);
             }
         }
     }
@@ -337,6 +340,7 @@ static void battUpdate() {
             snprintf(buf, sizeof(buf), "Battery protection armed (charging at %.2fV)",
                      vx100 / 100.0f);
             green(buf);
+            alertQueue(buf);
         }
         battArmed = true;
         battLow = false;                       // alternator is running
@@ -354,15 +358,62 @@ static void battUpdate() {
             snprintf(buf, sizeof(buf), "BATTERY LOW %.2fV - drive reduced to %d dBm",
                      vx100 / 100.0f, cfg.battPaDrive);
             red(buf);
+            alertQueue(buf);
         } else {
             snprintf(buf, sizeof(buf), "Battery recovered %.2fV - rated drive restored",
                      vx100 / 100.0f);
             green(buf);
+            alertQueue(buf);
         }
     }
 }
 
 static bool battProtecting() { return battLow; }
+
+// ============================================================
+// Alerts
+//
+// A tracker in a vehicle has no console, so the events worth knowing
+// about - the supply moving, the battery falling, protection arming - are
+// queued here and put on the air instead, to a MeshCore public channel
+// and/or as an APRS message.
+//
+// Queued rather than sent inline for two reasons. A transmission cannot
+// happen inside the event that caused it: the supply-moved alert fires
+// precisely when the rule says do not transmit. And it bounds the
+// airtime - one alert per alertInterval, oldest first, on a loop pass of
+// its own so a retune never lands mid-beacon.
+//
+// The queue drops the OLDEST when full. A tracker that has just generated
+// six alerts is having an interesting time, and the most recent state is
+// the one worth hearing.
+// ============================================================
+
+static const uint8_t ALERT_SLOTS = 6;
+static const uint8_t ALERT_LEN   = 72;
+
+static char          alertQ[ALERT_SLOTS][ALERT_LEN];
+static uint8_t       alertHead = 0, alertCount = 0;
+static unsigned long alertLastSent = 0;
+static bool          alertSent = false;
+
+static void alertQueue(const char *text) {
+    if (!cfg.alertChannel[0] && !cfg.alertAprsCall[0]) return;   // nowhere to send
+    if (alertCount == ALERT_SLOTS) {
+        alertHead = (uint8_t)((alertHead + 1) % ALERT_SLOTS);
+        alertCount--;
+    }
+    uint8_t slot = (uint8_t)((alertHead + alertCount) % ALERT_SLOTS);
+    snprintf(alertQ[slot], ALERT_LEN, "%s%s%s",
+             cfg.alertMention, cfg.alertMention[0] ? " " : "", text);
+    alertCount++;
+}
+
+static bool alertPending() {
+    return alertCount > 0 &&
+           (!alertSent ||
+            (millis() - alertLastSent) >= (unsigned long)cfg.alertInterval * 1000UL);
+}
 
 // The drive to transmit at right now, for either network. Both paths must
 // use this: APRS setting it and MeshCore inheriting whatever was left over
@@ -752,6 +803,40 @@ static uint32_t gpsUnixTime() {
            gps.time.minute() * 60UL + gps.time.second();
 }
 
+static void sendAprsMessage(const char *to, const char *text);
+
+// Send the oldest queued alert. MeshCore first when configured - it is a
+// quarter the airtime of an APRS frame at these settings - then APRS.
+// A MeshCore message needs real time for its timestamp, so without a GPS
+// fix only the APRS path runs.
+static void alertFlush() {
+    if (!alertCount) return;
+    const char *text = alertQ[alertHead];
+    bool sent = false;
+
+    if (cfg.alertChannel[0] && cfg.meshEnabled && MeshCore::ready()) {
+        uint32_t now = gpsUnixTime();
+        if (now) {
+            char buf[128];
+            snprintf(buf, sizeof(buf), "TX MESH %s: %s", cfg.alertChannel, text);
+            purple(buf);
+            sent = MeshCore::sendChannelText(cfg, cfg.alertChannel, text, now,
+                                             currentDrive());
+        }
+    }
+    if (cfg.alertAprsCall[0]) {
+        sendAprsMessage(cfg.alertAprsCall, text);
+        sent = true;
+    }
+
+    if (sent || !cfg.alertChannel[0]) {   // drop it either way rather than spin
+        alertHead = (uint8_t)((alertHead + 1) % ALERT_SLOTS);
+        alertCount--;
+    }
+    alertLastSent = millis();
+    alertSent = true;
+}
+
 static void sendMeshAdvert(float lat, float lon) {
     uint32_t now = gpsUnixTime();
     if (now == 0) return;
@@ -777,6 +862,19 @@ static void sendMeshAdvert(float lat, float lon) {
 // ============================================================
 // Send Voltage Alert
 // ============================================================
+
+// Send one APRS message. This is what sendVoltageAlert() always did; it is
+// simply no longer specific to voltage.
+static void sendAprsMessage(const char *to, const char *text) {
+    char frame[200];
+    char padCall[10];
+    snprintf(padCall, sizeof(padCall), "%-9s", to);
+    snprintf(frame, sizeof(frame), "%s>APRFGT::%s:%s", cfg.callsign, padCall, text);
+    char buf[256];
+    snprintf(buf, sizeof(buf), "TX MSG: %s", frame);
+    purple(buf);
+    loraSendText(frame);
+}
 
 static void sendVoltageAlert(int vx100) {
     float v = vx100 / 100.0f;
@@ -805,6 +903,12 @@ static bool usbDriveReady(uint32_t) {
 // ============================================================
 
 void setup() {
+    // Why the last boot happened, read before watchdog_enable() overwrites
+    // the flag. A tracker in a vehicle cannot say "I restarted" any other
+    // way, and a watchdog reset out on the road is exactly the thing its
+    // operator would want to know about.
+    bool wasWatchdogReset = watchdog_enable_caused_reboot();
+
     // Arm the watchdog before anything that can fail, not after.
     //
     // Three init paths end in `while (true)` - a failed FatFS mount, a
@@ -1130,6 +1234,11 @@ void setup() {
     // Init GPS LED timing
     gpsLastBlink = millis() - (unsigned long)(cfg.gpsBlinkInterval * 1000);
 
+    char bootMsg[ALERT_LEN];
+    snprintf(bootMsg, sizeof(bootMsg), "%s up: %s",
+             cfg.callsign, wasWatchdogReset ? "WATCHDOG RESET" : "power on");
+    alertQueue(bootMsg);
+
     yellow("Start Tracking");
 }
 
@@ -1269,12 +1378,13 @@ void loop() {
     // Daily metadata timer
     bool metadataDue = metadataForced || ((nowMs - lastMetadataSend) >= 86400000UL);
 
+    bool alertDue = alertPending();
     bool meshDue = cfg.meshEnabled && MeshCore::ready() &&
                    (!meshAdvertSent ||
                     (nowMs - lastMeshAdvert) >= (unsigned long)cfg.meshInterval * 1000UL);
 
     // Nothing to do?
-    if (!sendBeacon && pendingVoltAlert < 0 && !metadataDue && !meshDue) {
+    if (!sendBeacon && pendingVoltAlert < 0 && !metadataDue && !meshDue && !alertDue) {
         delay(50);
         return;
     }
@@ -1286,6 +1396,15 @@ void loop() {
     // between the frames of something else. Yielding costs one 50 ms pass.
     if (meshDue && !sendBeacon && pendingVoltAlert < 0 && !metadataDue) {
         sendMeshAdvert(lat, lon);
+        delay(50);
+        return;
+    }
+
+    // Queued alerts, also on a pass of their own and for the same reason:
+    // a MeshCore message retunes the radio, which must not land between the
+    // frames of anything else.
+    if (alertPending() && !sendBeacon && pendingVoltAlert < 0 && !metadataDue) {
+        alertFlush();
         delay(50);
         return;
     }

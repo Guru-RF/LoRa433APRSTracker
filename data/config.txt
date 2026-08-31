@@ -78,6 +78,15 @@ battStartDelay=10
 battStepVolts=30
 battSettle=5
 
+# --- Alerts (no console in a car - put the diagnostics on the air) ---
+# Both destinations optional; both empty = off. Costs airtime, so it is
+# opt-in. alertChannel is a MeshCore public channel whose key is derived
+# from its name, e.g. #mbox. alertMention is prefixed to the text.
+alertChannel=
+alertMention=
+alertAprsCall=
+alertInterval=60
+
 # --- Parked ---
 # Stationary this long (seconds) and the beacon rate drops. 0 = off.
 sbParkedAfter=14400
