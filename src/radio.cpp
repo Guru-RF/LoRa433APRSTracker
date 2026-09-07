@@ -507,6 +507,28 @@ bool TrackerRadio::begin(const TrackerConfig &cfg, char *err, size_t errLen) {
 // Transmit
 // ============================================================
 
+bool TrackerRadio::warmup(uint32_t ms) {
+    if (!phy || !ms) return false;
+    // SetTxContinuousWave on the SX126x, using whatever setOutputPower()
+    // last programmed, so the amplifier sees exactly the drive the next
+    // frame will. There is no LoRa-mode carrier on the SX127x: RadioLib's
+    // transmitDirect() returns ERR_WRONG_MODEM unless the FSK modem is
+    // active, and the modem switch is private, so a V1 carrier would need
+    // beginFSK() and a full LoRa re-begin(). Not worth it for a diagnostic
+    // whose problem was only ever seen on V2.
+    if (activeChip == RADIO_CHIP_SX127X) return false;
+    watchdog_update();
+    if (phy->transmitDirect() != RADIOLIB_ERR_NONE) return false;
+    uint32_t start = millis();
+    while ((millis() - start) < ms) {
+        watchdog_update();
+        delay(20);
+    }
+    phy->standby();
+    watchdog_update();
+    return true;
+}
+
 bool TrackerRadio::send(const uint8_t *data, size_t len) {
     if (!phy) return false;
 

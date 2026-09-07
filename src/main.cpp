@@ -12,7 +12,7 @@
 #include <SerialPIO.h>
 #include <Wire.h>
 #include <TinyGPSPlus.h>
-#include <Adafruit_BME680.h>
+#include "bme680_direct.h"
 #include <Adafruit_SHTC3.h>
 #include <hardware/watchdog.h>
 #include <tusb.h>
@@ -76,11 +76,39 @@ TinyGPSPlus gps;
 SerialPIO gpsSerial(PIN_GPS_TX, PIN_GPS_RX, 256);
 
 // I2C Sensors
-Adafruit_BME680 bme680;
+// The BME680 takes its I2C bus in the CONSTRUCTOR. Its begin() is
+// begin(addr, initSettings) with no TwoWire parameter, so the previous
+// begin(0x77, &Wire1) compiled only because the pointer converts to
+// `initSettings = true` - and talked to Wire, not Wire1. The sensors on
+// this board are on Wire1 (GP6/GP7), so the BME680 path could never have
+// worked on any unit, and every one of them has quietly reported
+// "BME680 not found" with a perfectly good sensor answering at 0x77.
+//
+// SHTC3's begin() does take a bus, which is why that sensor always worked
+// and hid the problem.
+Bme680Direct bme680;
 Adafruit_SHTC3 shtc3;
 bool hasBME680 = false;
 bool hasSHTC3 = false;
 bool skipFirstBME680 = true;
+uint8_t bme680Failures = 0;   // consecutive, see the give-up in the beacon
+
+// Why this boot happened, kept for the whole session. It goes in both
+// banners and in the 60 s status line, because by the time anyone opens a
+// console on a board that restarted the banner has long scrolled away -
+// and "power on" versus "brownout" versus "watchdog" is the whole
+// difference between a bad supply and a bad firmware.
+static const char *bootReason      = "unknown";
+static uint32_t    bootsSincePower = 0;   // watchdog/soft restarts since the supply was last good
+
+static void bootReasonText(char *out, size_t len) {
+    if (bootsSincePower) {
+        snprintf(out, len, "%s, restart %lu since power-on", bootReason,
+                 (unsigned long)bootsSincePower);
+    } else {
+        snprintf(out, len, "%s", bootReason);
+    }
+}
 
 // SmartBeacon + Jitter Lock
 SmartBeacon sb;
@@ -497,9 +525,12 @@ static void usbHostHold() {
         if (usbInhibit) {
             yellow("TX inhibited - USB host still connected");
         } else {
-            char buf[88];
+            char why[64];
+            bootReasonText(why, sizeof(why));
+            char buf[160];
             snprintf(buf, sizeof(buf),
-                     "USB host still connected - drive held at %d dBm", cfg.usbPaDrive);
+                     "USB host still connected - drive held at %d dBm (up %lu min, booted: %s)",
+                     TrackerRadio::appliedPower(), (unsigned long)(now / 60000UL), why);
             yellow(buf);
         }
     }
@@ -758,6 +789,32 @@ static void sendMetadata() {
 
     yellow("Sending telemetry metadata...");
 
+    // Diagnostics for the lost-first-frames problem, both off by default:
+    // a carrier before the burst asks whether the PA needs to run before
+    // it is clean, a long gap asks whether the receiver needs the air
+    // quiet between frames. See DEFAULT_META_GAP in config_file.h.
+    if (cfg.paWarmup > 0 && !txInhibited() && TrackerRadio::chip() == RADIO_CHIP_SX126X) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "TX WARMUP: %d ms carrier at %d dBm",
+                 cfg.paWarmup, currentDrive());
+        purple(buf);
+        digitalWrite(PIN_LED_LORA, HIGH);
+        TrackerRadio::setDrive(currentDrive());
+        bool needPa = cfg.hasPa || TrackerRadio::hasModulePa();
+        if (needPa) {
+            digitalWrite(PIN_PA, HIGH);
+            delay(250);
+            watchdog_update();
+        }
+        if (!TrackerRadio::warmup(cfg.paWarmup)) red("WARMUP FAILED");
+        if (needPa) {
+            delay(100);
+            digitalWrite(PIN_PA, LOW);
+        }
+        digitalWrite(PIN_LED_LORA, LOW);
+        delay(cfg.metaGap);
+    }
+
     String metas[] = { metaPARM, metaUNIT, metaEQNS };
     for (int i = 0; i < 3; i++) {
         watchdog_update();
@@ -770,7 +827,11 @@ static void sendMetadata() {
         snprintf(buf, sizeof(buf), "TX META: %s", frame);
         purple(buf);
         loraSendText(frame);
-        delay(150);
+        watchdog_update();
+        for (int left = cfg.metaGap; left > 0; left -= 100) {
+            delay(left > 100 ? 100 : left);
+            watchdog_update();
+        }
     }
 }
 
@@ -822,6 +883,11 @@ static void alertFlush() {
             purple(buf);
             sent = MeshCore::sendChannelText(cfg, cfg.alertChannel, text, now,
                                              currentDrive());
+            // Unconditional: a false return can still have keyed the PA
+            // (send failed after the retune), and the battery sampler must
+            // hold off after any keying or it reads the rail's recovery as
+            // a supply step and queues an alert that repeats the cycle.
+            lastTxEnd = millis();
         }
     }
     if (cfg.alertAprsCall[0]) {
@@ -855,6 +921,7 @@ static void sendMeshAdvert(float lat, float lon) {
 
     digitalWrite(PIN_LED_LORA, LOW);
     lastMeshAdvert = millis();
+    lastTxEnd      = millis();   // the battery sampler holds off after any keying, this one included
     meshAdvertSent = true;
     watchdog_update();
 }
@@ -908,6 +975,28 @@ void setup() {
     // way, and a watchdog reset out on the road is exactly the thing its
     // operator would want to know about.
     bool wasWatchdogReset = watchdog_enable_caused_reboot();
+    switch (rp2040.getResetReason()) {
+        case RP2040::WDT_RESET:      bootReason = "watchdog timeout";  break;
+        case RP2040::SOFT_RESET:     bootReason = "software reboot";   break;   // eject, onUnplug, rp2040.reboot()
+        case RP2040::PWRON_RESET:    bootReason = "power on";          break;   // on the RP2040 a brownout looks the same
+        case RP2040::BROWNOUT_RESET: bootReason = "BROWNOUT";          break;
+        case RP2040::GLITCH_RESET:   bootReason = "supply glitch";     break;
+        case RP2040::RUN_PIN_RESET:  bootReason = "RUN pin";           break;
+        case RP2040::DEBUG_RESET:    bootReason = "debugger";          break;
+        default:                     bootReason = "unknown";           break;
+    }
+    // The watchdog scratch registers survive a watchdog or software reboot
+    // and are cleared by a real power-on, so scratch[3] counts restarts
+    // since the supply was last good. A tracker that says "restart 7 since
+    // power-on" has a firmware problem; one that says "power on" every
+    // time it comes back has a supply problem.
+    if (rp2040.getResetReason() == RP2040::WDT_RESET ||
+        rp2040.getResetReason() == RP2040::SOFT_RESET) {
+        bootsSincePower = watchdog_hw->scratch[3] + 1;
+    } else {
+        bootsSincePower = 0;
+    }
+    watchdog_hw->scratch[3] = bootsSincePower;
 
     // Arm the watchdog before anything that can fail, not after.
     //
@@ -959,15 +1048,30 @@ void setup() {
     Serial.print("\r\n");
 
     char banner[128];
-    snprintf(banner, sizeof(banner), " -- Tracker Booted: %s -=- %s", cfg.callsign, VERSION);
+    // The reset cause goes in THIS banner, not only the later one: a board
+    // that dies in the filesystem or USB bring-up never reaches the later
+    // one, and this line is then the only thing a console ever shows.
+    char why[64];
+    bootReasonText(why, sizeof(why));
+    snprintf(banner, sizeof(banner), " -- Tracker Booted: %s -=- %s (%s)", cfg.callsign, VERSION, why);
     red(banner);
 
-    // Init FAT filesystem and do all file ops BEFORE starting USB drive
-    if (!FatFS.begin()) {
+    // Init FAT filesystem and do all file ops BEFORE starting USB drive.
+    // FatFS.begin() formats the region when it finds no filesystem there,
+    // and erasing 0.5 MB of flash takes longer than the 8 s watchdog
+    // allows: on a fresh board (or one converted from CircuitPython) the
+    // watchdog fired mid-format and the config written next was corrupt.
+    // Nothing else runs here, so the watchdog is paused for this call.
+    hw_clear_bits(&watchdog_hw->ctrl, WATCHDOG_CTRL_ENABLE_BITS);
+    bool fsOk = FatFS.begin();
+    watchdog_enable(8000, true);
+    if (!fsOk) {
         red("FatFS init failed! (watchdog will reboot and retry)");
         while (true) delay(1000);
     }
     fatfs::f_setlabel("APRSTRKR");
+    yellow("FatFS mounted");
+    watchdog_update();
 
     // Load config (creates default if missing)
     if (!configLoad(cfg)) {
@@ -979,8 +1083,14 @@ void setup() {
     // Check for firmware update trigger
     File cfgFile = FatFS.open("/config.txt", "r");
     if (cfgFile) {
+        // Only the magic word matters, so read no more than could be it,
+        // and never loop on a read that fails.
         String content;
-        while (cfgFile.available()) content += (char)cfgFile.read();
+        for (int i = 0; i < 32 && cfgFile.available(); i++) {
+            int c = cfgFile.read();
+            if (c < 0) break;
+            content += (char)c;
+        }
         cfgFile.close();
         content.trim();
         if (content == "firmwareupdate") {
@@ -1018,6 +1128,8 @@ void setup() {
     // Start USB mass storage (after all file operations). Ejecting
     // reboots so the new config takes effect - and nothing more, now
     // that the transmitter no longer depends on the eject.
+    snprintf(banner, sizeof(banner), "Config loaded for %s, starting USB mass storage", cfg.callsign);
+    yellow(banner);
     FatFSUSB.onUnplug([](uint32_t) { rp2040.reboot(); });
     FatFSUSB.driveReady(usbDriveReady);
     FatFSUSB.begin();
@@ -1166,13 +1278,78 @@ void setup() {
         Wire1.setClock(100000);
         Wire1.begin();
 
+        if (cfg.fullDebug) {
+            // What is actually on the bus. One line here answers "is my
+            // sensor wired up, and at which address" without guessing.
+            char found[64] = "";
+            int n = 0;
+            for (uint8_t a = 0x08; a < 0x78; a++) {
+                Wire1.beginTransmission(a);
+                if (Wire1.endTransmission() == 0 && n < 6) {
+                    n += snprintf(found + strlen(found), sizeof(found) - strlen(found),
+                                  "0x%02X ", a);
+                }
+            }
+            char scanMsg[96];
+            snprintf(scanMsg, sizeof(scanMsg), "> I2C scan: %s",
+                     found[0] ? found : "nothing responding");
+            yellow(scanMsg);
+
+            // Bosch parts all put their chip ID at 0xD0, and the value says
+            // which one it is. A device that answers on the bus but fails
+            // begin() is almost always the wrong part rather than a wiring
+            // fault, and this says which without anyone guessing.
+            for (uint8_t a = 0x76; a <= 0x77; a++) {
+                Wire1.beginTransmission(a);
+                Wire1.write(0xD0);
+                if (Wire1.endTransmission(false) != 0) continue;
+                if (Wire1.requestFrom((int)a, 1) != 1) continue;
+                uint8_t id = Wire1.read();
+                const char *part = (id == 0x61) ? "BME680"
+                                 : (id == 0x60) ? "BME280 (unsupported)"
+                                 : (id == 0x58) ? "BMP280 (unsupported)"
+                                 : (id == 0x55) ? "BMP180 (unsupported)"
+                                 : "unknown";
+                snprintf(scanMsg, sizeof(scanMsg), "> 0x%02X chip id 0x%02X = %s",
+                         a, id, part);
+                yellow(scanMsg);
+            }
+        }
+
         if (strcasecmp(cfg.i2cDevice, "BME680") == 0) {
-            if (bme680.begin(0x77, &Wire1)) {
+            // Both addresses, not just 0x77. A BME680's address is set by
+            // its SDO pin and breakout boards very commonly tie it low,
+            // putting the part at 0x76 - where the old code never looked,
+            // so a perfectly good sensor reported "not found".
+            uint8_t addr = 0;
+            for (uint8_t cand = 0x77; cand >= 0x76 && !addr; cand--) {
+                if (bme680.begin(&Wire1, cand, PIN_I2C_PWR,
+                                 PIN_I2C_SDA, PIN_I2C_SCL, 100000)) addr = cand;
+                watchdog_update();
+            }
+            if (addr) {
                 hasBME680 = true;
-                bme680.setTemperatureOversampling(BME680_OS_8X);
-                bme680.setHumidityOversampling(BME680_OS_2X);
-                bme680.setPressureOversampling(BME680_OS_4X);
-                green("> BME680 OK");
+                char okMsg[96];
+                snprintf(okMsg, sizeof(okMsg), "> BME680 OK at 0x%02X", addr);
+                green(okMsg);
+                if (cfg.fullDebug) {
+                    // Init succeeding only means the calibration read; take
+                    // an actual measurement so the console shows the sensor
+                    // producing numbers, not just answering.
+                    if (bme680.performReading()) {
+                        snprintf(okMsg, sizeof(okMsg), "> BME680 %.1fC %.0f%% %.0fhPa",
+                                 bme680.temperature, bme680.humidity,
+                                 bme680.pressure / 100.0f);
+                        yellow(okMsg);
+                    } else {
+                        snprintf(okMsg, sizeof(okMsg),
+                                 "> BME680 no reading: mode %d data %d, %s reg 0x%02X code %d",
+                                 bme680.lastModeRslt, bme680.lastDataRslt,
+                                 bme680.errRead() ? "read" : "write", bme680.errReg(),
+                                 bme680.errCode());
+                        yellow(okMsg);
+                    }
+                }
             } else {
                 yellow("> BME680 not found, continuing");
             }
@@ -1187,7 +1364,7 @@ void setup() {
 
         if (!hasBME680 && !hasSHTC3) {
             yellow("No sensors found, continuing without");
-            digitalWrite(PIN_I2C_PWR, LOW);
+            i2cRailOff(Wire1, PIN_I2C_PWR, PIN_I2C_SDA, PIN_I2C_SCL);
         }
     }
 
@@ -1214,6 +1391,15 @@ void setup() {
     watchdog_enable(5000, true);
 
     usbInhibitUpdate();
+
+    // Program the transmit drive BEFORE the first frame rather than inside
+    // it. setDrive() is a no-op when the value is unchanged, so every frame
+    // after the first is - but the first inherits appliedPwr from begin()
+    // (rated paDrive) and, whenever that differs from what currentDrive()
+    // wants, reprograms SetPaConfig/SetTxParams immediately before keying.
+    // That made exactly one transmission per boot unlike all the others,
+    // and it was the one that never decoded.
+    TrackerRadio::setDrive(currentDrive());
     if (txInhibited()) {
         yellow("Telemetry metadata held while a USB host is connected");
     } else if (startupHold()) {
@@ -1235,8 +1421,9 @@ void setup() {
     gpsLastBlink = millis() - (unsigned long)(cfg.gpsBlinkInterval * 1000);
 
     char bootMsg[ALERT_LEN];
-    snprintf(bootMsg, sizeof(bootMsg), "%s up: %s",
-             cfg.callsign, wasWatchdogReset ? "WATCHDOG RESET" : "power on");
+    bootReasonText(why, sizeof(why));
+    snprintf(bootMsg, sizeof(bootMsg), "%s up: %s", cfg.callsign, why);
+    (void)wasWatchdogReset;
     alertQueue(bootMsg);
 
     yellow("Start Tracking");
@@ -1510,17 +1697,28 @@ void loop() {
             if (skipFirstBME680) {
                 skipFirstBME680 = false;
                 bme680.performReading();
-            } else {
-                if (bme680.performReading()) {
-                    float tC = bme680.temperature + (float)cfg.bme680TempOffset;
-                    float rH = bme680.humidity;
-                    int tCode = (int)((tC / 2.0f + 25.0f) * 100);
-                    int hCode = (int)(rH + 0.5f);
-                    base91Encode(b91, tCode);
-                    cpos += snprintf(comment + cpos, sizeof(comment) - cpos, "%s", b91);
-                    base91Encode(b91, hCode);
-                    cpos += snprintf(comment + cpos, sizeof(comment) - cpos, "%s", b91);
-                }
+            } else if (bme680.performReading()) {
+                bme680Failures = 0;
+                float tC = bme680.temperature + (float)cfg.bme680TempOffset;
+                float rH = bme680.humidity;
+                int tCode = (int)((tC / 2.0f + 25.0f) * 100);
+                int hCode = (int)(rH + 0.5f);
+                base91Encode(b91, tCode);
+                cpos += snprintf(comment + cpos, sizeof(comment) - cpos, "%s", b91);
+                base91Encode(b91, hCode);
+                cpos += snprintf(comment + cpos, sizeof(comment) - cpos, "%s", b91);
+            } else if (++bme680Failures >= 3) {
+                // Three in a row is a part that has stopped answering, not
+                // a glitch. Stop paying the bus timeouts every beacon, drop
+                // the rail, and say which transfer failed where a car can
+                // hear it - the console it has none.
+                hasBME680 = false;
+                if (!hasSHTC3) i2cRailOff(Wire1, PIN_I2C_PWR, PIN_I2C_SDA, PIN_I2C_SCL);
+                char msg[64];
+                snprintf(msg, sizeof(msg), "BME680 gave up: %s 0x%02X code %d",
+                         bme680.errRead() ? "rd" : "wr", bme680.errReg(), bme680.errCode());
+                red(msg);
+                alertQueue(msg);
             }
         }
 

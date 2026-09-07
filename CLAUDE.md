@@ -36,6 +36,30 @@ nothing. Beware too that the first beacon of a session always carries the
 comment whatever `commentInterval` says, so it cannot confirm that setting -
 only the second one can.
 
+## Open, as of 2026-09-07
+
+Two boards on the bench that day, and where each was left:
+
+- **OR7F-5 (V2).** Its BME680 is dead (see "BME680"). Its boot burst loses
+  the earliest frames whenever the module PA is amplifying, on either
+  supply, and every firmware-side explanation has been closed (see the end
+  of "V2: transmitting on USB power"). Its `config.txt` still carries the
+  last experiment: `paDrive=8`, `usbPaDrive=-9`, `metaGap=3000`,
+  `paWarmup=0`, `fullDebug=true`. Next: run the iGate with CRC-error
+  logging (the `log_warn` in `../PILoRa433APRSiGate` `lora_take()`), then
+  `paWarmup=2000` with `metaGap=150`.
+- **OR7F-8 (V1).** Converted that day from the CircuitPython firmware in
+  `5d1326b`; runs the generated default `config.txt` with `callsign=OR7F-8`,
+  `comment=https://RF.Guru Q5`, `meshEnabled=true`, `meshName=OR7F-8`. It
+  beaconed and sent the first MeshCore advert ever from an SX1276, then at
+  18:02 dropped off USB and did not re-enumerate for minutes - not a
+  watchdog reboot, which comes back in seconds; a pulled cable or a lost
+  supply. It is still on the build *before* the reset-cause banner, so the
+  first thing to do with it is flash HEAD and read the banner.
+- The `usbPaDrive` clamp applies to V1 too, where it was never measured;
+  the SX127x branch of `setDrive()` turns -9 into +2 dBm. Left as is,
+  deliberately, until someone decides what a V1 on USB should do.
+
 ## Things that look like bugs but are not
 
 - **GP15 is not a board-revision strap.** It measures low on V1 hardware too,
@@ -57,6 +81,82 @@ only the second one can.
 - **`CONFIG_TEMPLATE` in `include/config_file.h` is dead code.** The live
   default file is written line by line in `configCreateDefault()`. Keep them
   in step or delete the template.
+
+## First boot and the filesystem
+
+`FatFS.begin()` formats the region when it finds no filesystem there, and
+erasing 0.5 MB of flash takes longer than the 8 s watchdog allows. On a fresh
+board - or one converted from the CircuitPython firmware in this repo's
+history (`5d1326b`), whose FAT sits at a different offset - the watchdog
+fired mid-format, the default `config.txt` written next was left with a
+directory entry of size 0 over clusters full of text, and every later boot
+hung reading it: milliseconds per byte, end of file never reached, watchdog
+reset, repeat. A 12 s boot loop that prints only the first banner is this.
+
+Three things now stand between a board and that loop, and each is
+load-bearing: the watchdog is paused around `FatFS.begin()` (nothing else
+runs there); `configCreateDefault()` feeds it through its ninety lines; and
+`configLoad()` treats `read() < 0` as end of file - the old `char c =
+f.read()` turned -1 into 0xFF and could not terminate - caps the byte count,
+and gives the whole load 3 s, past which it reformats, rewrites the default
+and reboots. That reformat discards `/meshid.bin` too; a board in a boot
+loop has no identity worth more than booting.
+
+The first banner carries the reset cause from `rp2040.getResetReason()` -
+`power on`, `watchdog timeout`, `software reboot` (eject, `onUnplug`),
+`RUN pin` - plus a count of restarts since the supply was last good, kept in
+`watchdog_hw->scratch[3]`, which a watchdog or software reboot preserves and
+a real power-on clears. The same text repeats in the 60 s "USB host still
+connected" line with the uptime, because by the time anyone opens a console
+on a board that restarted the banner is gone. On the RP2040 a brownout is
+reported as `power on` (the chip has one POR flag for both), so a tracker
+that keeps saying "power on" with a restart count of 0 is losing its supply,
+and one that says "restart 7 since power-on" is losing to the firmware.
+Uploading over a looping board is a race - picotool's 1200 baud touch misses
+about half the time - so use BOOTSEL.
+
+## BME680
+
+`include/bme680_direct.h` drives the sensor through Bosch's `bme68x` API
+directly rather than `Adafruit_BME680`. Two facts explain it, both
+established on OR7F-5 with the board on the bench:
+
+- **The sensor never worked before, on any unit.** `Adafruit_BME680 bme680;`
+  defaults to `Wire` - I2C0, on GP4/GP5, which is the GPS UART here - and
+  `begin(0x77, &Wire1)` compiled only because `begin()` has no `TwoWire`
+  parameter: the pointer became `initSettings = true`. So there is no known
+  good Adafruit configuration to fall back to.
+- **`bme68x_init()` opens with a soft reset, and one of these parts does not
+  come back from it.** It ACKs `0xE0 = 0xB6` and then NAKs everything: bus
+  idle high, nothing stuck, no recovery after 610 ms, a 9-clock bus clear or
+  an I2C block re-init. Only cutting its rail restores it - and only with SDA
+  and SCL held low meanwhile, or the pull-ups back-power it through its ESD
+  diodes and it never resets. Adafruit keeps `gas_sensor` private, so the
+  reset cannot be skipped from outside; the write callback swallows it and
+  `begin()` power-cycles the rail instead. Settings are Adafruit's verbatim.
+
+Use `i2cRailOff()` to drop the sensor rail, never a bare
+`digitalWrite(PIN_I2C_PWR, LOW)`, for the back-powering reason above.
+
+**The part on OR7F-5 is beyond firmware.** With the reset out of the way it
+initialises and reads its full calibration block, then vanishes the moment
+a measurement starts - `read reg 0x1D code 4` - and comes back seconds later
+in power-on state with its configuration gone. That holds with 1x
+oversampling and the heater off, with GP3 at 12 mA drive, and with the bus
+completely silent for 3 s after the trigger, so it is not load, not the rail
+switch and not bus timing. A digital side that works while the measurement
+engine collapses is a damaged or counterfeit part, or a module whose VDD
+(not VDDIO) is unpowered; check both pins sit at 3.3 V and swap the module.
+After three consecutive failed readings the beacon path gives up on it, cuts
+the rail, and queues `BME680 gave up: rd 0x1D code 4` as an alert.
+
+`fullDebug` prints the bus scan, the chip ID at 0x76/0x77, and either a
+reading or the exact transfer that failed. The driver initialises the healthy
+BME680 on OR7F-8 - the V1 board converted from CircuitPython, whose old
+firmware read that same part - so the driver is not what is wrong with
+OR7F-5's. A reading has still not been seen on a console (OR7F-8 came up
+with `fullDebug` off), so the first unit that shows one should be checked
+against a known thermometer before anyone trusts `bme680TempOffset`.
 
 ## Transmit inhibit while a USB host is attached
 
@@ -162,3 +262,38 @@ than by what transmits without hanging: 9..14 transmit cleanly and are never
 heard, and 17 takes the USB link down. An earlier note here recommended
 `paDrive=14`, which is both the wrong key - `currentDrive()` ignores `paDrive`
 entirely while a host is enumerated - and a value in the silent band.
+
+### The boot-burst loss on OR7F-5, and what it is not
+
+On the bench OR7F-5 loses the *earliest* frames of the three-frame metadata
+burst whenever the module PA is amplifying, on either supply, and only the
+last frame sent survives - the table is in
+[docs/v2-beacon-crash.md](docs/v2-beacon-crash.md). A 34-agent review of the
+iGate, RadioLib and this firmware, every claim adversarially verified, closed
+the firmware-side explanations:
+
+- **The iGate cannot lose a frame to the next one.** `../PILoRa433APRSiGate`
+  is the C port: it polls RxDone every 10 ms, reads the FIFO and re-arms RX
+  in one sub-millisecond pass, and has no dedup or rate limit. The air is
+  silent for ~500 ms between our frames (100 ms post-TX hold, `metaGap`,
+  250 ms PA pre-charge) plus a 262 ms preamble - not the 150 ms the gap key
+  suggests.
+- **Our three frames are byte-identical on the SPI bus**, each from STDBY_RC
+  with a 200 us ramp; TX_DONE cannot be stale, frames cannot overlap, drive
+  is frozen for the burst, LDRO and time-on-air are right.
+- **The iGate logs nothing for a frame that fails CRC** - `rfm9x.c` only
+  counts it - so "not in the journal" has never distinguished "arrived
+  corrupt" from "never demodulated". That is the measurement that separates
+  a dirty PA from a silent one; a `log_warn` in `lora_take()` for `len < 0`
+  provides it.
+- **`paDrive` 19..22 all program `SetTxParams(+22)`**; RadioLib's
+  `paOptTable` varies only `paDutyCycle`/`hpMax` across them, so a ladder
+  through those values moves the PA's operating point, not the die's power
+  register. And 8 -> 9 jumps the power byte 13 -> 20, which is exactly where
+  the USB silent band begins.
+- The iGate's RSSI uses the HF-port offset in the LF band, so its numbers
+  read about 7 dB high. Compare them with each other, not with a budget.
+
+`metaGap` and `paWarmup` in `config.txt` exist for the two physical
+hypotheses that remain; `metaGap=3000` has been run (still nothing) and
+`paWarmup` has not. Both default to the behaviour deployed units have.

@@ -51,6 +51,14 @@ bool begin(const TrackerConfig &cfg, char *err, size_t errLen);
 // time-on-air budget expires), feeding the watchdog throughout.
 bool send(const uint8_t *data, size_t len);
 
+// Key an unmodulated carrier for `ms` at the current drive and profile,
+// feeding the watchdog, then return to standby. A diagnostic for a PA
+// suspected of being dirty until it has run for a while: it is the same
+// power the next frame would use, on the same frequency, with no data.
+// SX126x only - returns false on the SX127x, which cannot key a carrier
+// from LoRa mode.
+bool warmup(uint32_t ms);
+
 // Re-program the transmit drive between packets, clamped to what the
 // fitted chip can produce. On a module with its own amplifier this is
 // the drive into that amplifier; on a bare module it is the output

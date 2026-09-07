@@ -121,3 +121,33 @@ Still worth doing:
    depending on a watchdog reset.
 3. Note that the eject latch survives a watchdog reset, so a repeatedly
    stalling transmit currently retries forever. Removing the latch fixes this.
+
+## 2026-09-07: OR7F-5 on the bench, boot burst
+
+A second V2 unit, iGate 8 m away, three-frame metadata burst at boot
+(PARM, UNIT, EQNS, 82-byte SF12 frames). Recorded because the result
+does not follow the drive, and a later reader should not assume it does.
+
+| supply | chip drive | gap | decoded | notes |
+|---|---|---|---|---|
+| USB | -9 | 150 ms | 3/3 | -84/-85 dBm |
+| USB | 8 | 150 ms | 1/3 | EQNS only, -73/-75 dBm |
+| 13.8 V | 22 | 150 ms | 0/3 | both antennas |
+| 13.8 V | 21 | 150 ms | 0/3 | |
+| 13.8 V | 20 | 150 ms | 0/3 | |
+| 13.8 V | 19 | 150 ms | 2/3 then 0/3 | morning vs afternoon, same setup |
+| 13.8 V | 16 | 150 ms | - | "crashed", not characterised |
+| 13.8 V | 8 | 150 ms | 1/3 | EQNS only, -47 dBm, SNR 6.5 |
+| 13.8 V | 8 | 3000 ms | 0/3 | |
+
+What is known: no watchdog reboots; the frame that survives is always
+the last one sent, whatever its content (order was reversed to check);
+the last-frame survival at 8 dBm on 13.8 V arrived loud and dirty
+(-47 dBm, SNR 6.5). What is not known: why 19 dBm decoded 2/3 in the
+morning and 0/3 in the afternoon, or why 8 dBm went from 1/3 to 0/3
+with only the inter-frame gap changed. `metaGap` and `paWarmup` in
+config.txt exist for this; the warm-up has not been run yet.
+
+This is the same unit whose BME680 collapses the moment it measures
+(CLAUDE.md, "BME680"). The next control is a V1 board on this firmware
+at rated drive on 13.8 V.

@@ -7,6 +7,7 @@
 
 #include <Arduino.h>
 #include <FatFS.h>
+#include <hardware/watchdog.h>
 
 extern FS FatFS;
 
@@ -31,6 +32,16 @@ extern FS FatFS;
 // SX1262's floor into a module amplifier and is still tens of dB
 // above what a nearby receiver needs. See src/main.cpp.
 #define DEFAULT_USB_PA_DRIVE  -9
+
+// Boot-burst diagnostics. Something loses the EARLIEST frames of the
+// three-frame metadata burst on OR7F-5 whenever the module PA is actually
+// amplifying, and only the last frame sent survives. Two explanations
+// predict opposite outcomes: an iGate that drops a frame when the next
+// preamble arrives 150 ms behind it wants a longer gap; a PA that is dirty
+// until it has run for a while wants a warm-up before the first frame.
+// Both default to the behaviour we always had.
+#define DEFAULT_META_GAP      150     // ms between the burst's frames
+#define DEFAULT_PA_WARMUP     0       // ms of unmodulated carrier before it
 // Hard ceiling for usbPaDrive, not a preference, and set by what is
 // actually *received* rather than by what transmits without hanging.
 // Measured against an iGate 8 m away: 8 decodes at -46 dBm, 7 at -43,
@@ -229,6 +240,8 @@ struct TrackerConfig {
     bool   fullDebug;
     bool   usbTxInhibit;
     int    usbPaDrive;
+    int    metaGap;
+    int    paWarmup;
 
     // MeshCore
     bool   aprsTimestamp;
@@ -306,6 +319,8 @@ static void configSetDefaults(TrackerConfig &cfg) {
     cfg.fullDebug = DEFAULT_FULL_DEBUG;
     cfg.usbTxInhibit = DEFAULT_USB_TX_INHIBIT;
     cfg.usbPaDrive = DEFAULT_USB_PA_DRIVE;
+    cfg.metaGap = DEFAULT_META_GAP;
+    cfg.paWarmup = DEFAULT_PA_WARMUP;
 
     cfg.aprsTimestamp = DEFAULT_APRS_TIMESTAMP;
     cfg.aprsAltitude = DEFAULT_APRS_ALTITUDE;
@@ -421,6 +436,10 @@ static void configSetValue(TrackerConfig &cfg, const char *key, const char *val)
         cfg.usbTxInhibit = (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0);
     } else if (strcasecmp(key, "usbPaDrive") == 0) {
         cfg.usbPaDrive = constrain(atoi(val), -9, USB_PA_DRIVE_MAX);
+    } else if (strcasecmp(key, "metaGap") == 0) {
+        cfg.metaGap = constrain(atoi(val), 0, 10000);
+    } else if (strcasecmp(key, "paWarmup") == 0) {
+        cfg.paWarmup = constrain(atoi(val), 0, 5000);
     } else if (strcasecmp(key, "aprsTimestamp") == 0) {
         cfg.aprsTimestamp = (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0);
     } else if (strcasecmp(key, "aprsAltitude") == 0) {
@@ -590,6 +609,10 @@ static const char *CONFIG_TEMPLATE =
     "usbPaDrive=-9\n"
     "# Or refuse to transmit at all while a computer is attached.\n"
     "usbTxInhibit=false\n"
+    "# Boot-burst diagnostics: ms between the three metadata frames, and ms\n"
+    "# of unmodulated carrier before the first one. Leave at 150 and 0.\n"
+    "metaGap=150\n"
+    "paWarmup=0\n"
     "\n"
     "# --- Battery (thresholds measured on a vehicle) ---\n"
     "# Arms itself only after it has seen the alternator, so a tracker on\n"
@@ -644,7 +667,11 @@ static bool configCreateDefault() {
         Serial.println("[CONFIG] ERROR: Could not create file");
         return false;
     }
-    // Write line by line to avoid large buffer issues
+    // Write line by line to avoid large buffer issues. The watchdog is fed
+    // along the way: ninety lines is several sector programs, and on a
+    // fresh board this ran past its 8 s and left a file with a size of 0
+    // over clusters full of text - which then hung every boot after.
+    watchdog_update();
     f.println("# RF.Guru LoRa 433 APRS Tracker Configuration");
     f.println("# Edit this file and reboot/eject the device to apply");
     f.println("");
@@ -671,6 +698,7 @@ static bool configCreateDefault() {
     f.println("# SX1262 PA current limit in mA, max 157");
     f.println("loraOcp=140");
     f.println("");
+    watchdog_update();
     f.println("voltage=true");
     f.println("triggerVoltage=true");
     f.println("triggerVoltageLevel=1200");
@@ -686,7 +714,12 @@ static bool configCreateDefault() {
     f.println("usbPaDrive=-9");
     f.println("# Or refuse to transmit at all while a computer is attached.");
     f.println("usbTxInhibit=false");
+    f.println("# Boot-burst diagnostics: ms between the three metadata frames, and ms");
+    f.println("# of unmodulated carrier before the first one. Leave at 150 and 0.");
+    f.println("metaGap=150");
+    f.println("paWarmup=0");
     f.println("");
+    watchdog_update();
     f.println("# --- Battery (thresholds measured on a vehicle) ---");
     f.println("# Arms only after it has seen the alternator, so a tracker on");
     f.println("# USB or a bench supply never throttles itself.");
@@ -712,6 +745,7 @@ static bool configCreateDefault() {
     f.println("sbParkedAfter=14400");
     f.println("sbParkedRate=1800");
     f.println("");
+    watchdog_update();
     f.println("# --- Airtime ---");
     f.println("# At SF12 a frame is ~3.5s on air. Each of these saves ~10%.");
     f.println("# timestamp off sends '!' instead of '@ddhhmmz'.");
@@ -720,6 +754,7 @@ static bool configCreateDefault() {
 f.println("# Seconds between comments, or \"always\". aprs.fi caches for 7 days.");
     f.println("commentInterval=1800");
     f.println("");
+    watchdog_update();
     f.println("# --- MeshCore (IARU R1 ham profile, 70cm) ---");
     f.println("# Mints an Ed25519 identity in /meshid.bin on first enable.");
     f.println("meshEnabled=false");
@@ -732,6 +767,7 @@ f.println("# Seconds between comments, or \"always\". aprs.fi caches for 7 days.
     f.println("");
     f.println("fullDebug=false");
     f.close();
+    watchdog_update();
     Serial.println("[CONFIG] Default config.txt created");
     return true;
 }
@@ -750,15 +786,35 @@ static bool configLoad(TrackerConfig &cfg) {
         return false;
     }
 
+    // A config.txt whose first-boot write was cut short - a directory
+    // entry of size 0 over clusters that still hold the text - reads at
+    // milliseconds per byte and never reaches end of file, and a board
+    // that hangs here reboots on the watchdog forever. So the read is
+    // bounded three ways: read() < 0 is end of file (the old `char c`
+    // turned -1 into 0xFF and looped), the byte count is capped, and the
+    // whole load has a time budget a healthy file clears in milliseconds.
+    // Blowing it means the filesystem is what is broken.
+    const unsigned long budgetMs = 3000;
+    const size_t        maxBytes = 16384;
+    unsigned long       t0       = millis();
+    size_t              total    = 0;
+    bool                corrupt  = false;
+
     char line[128];
     while (f.available()) {
         int len = 0;
-        char c;
         memset(line, 0, sizeof(line));
         while (f.available() && len < (int)sizeof(line) - 1) {
-            c = f.read();
+            int c = f.read();
+            if (c < 0) break;
+            total++;
             if (c == '\n') break;
-            line[len++] = c;
+            line[len++] = (char)c;
+        }
+        watchdog_update();
+        if (total > maxBytes || (millis() - t0) > budgetMs) {
+            corrupt = true;
+            break;
         }
         line[len] = '\0';
         trimWhitespace(line);
@@ -780,6 +836,24 @@ static bool configLoad(TrackerConfig &cfg) {
     }
 
     f.close();
+
+    if (corrupt) {
+        Serial.printf("[CONFIG] config.txt unreadable (%u bytes in %lu ms) - "
+                      "reformatting the filesystem and starting over\n",
+                      (unsigned)total, millis() - t0);
+        // This loses /meshid.bin too. A board stuck in a boot loop has no
+        // identity worth keeping, so that is the lesser loss.
+        FatFS.end();
+        watchdog_update();
+        FatFS.format();
+        watchdog_update();
+        FatFS.begin();
+        configCreateDefault();
+        Serial.println("[CONFIG] Rebooting on the fresh filesystem");
+        delay(200);
+        rp2040.reboot();
+        while (true) { }
+    }
 
     configApplyProfile(cfg);
 
