@@ -28,6 +28,24 @@ static const uint8_t  LORA_CR         = 5;        // 4/5
 static const uint8_t  LORA_SYNC_WORD  = 0x12;
 static const uint16_t LORA_PREAMBLE   = 8;
 
+// MeshCom is the one profile that does not share the 0x12 sync word.
+// Its firmware sets 0x2b on an SX127x (configuration_global.h,
+// SYNC_WORD_SX127x) and writes the raw register pair 0x242b on an
+// SX126x (lora_setchip.cpp, SetCustomSyncWord). A node listening on
+// 0x242b never even sees a 0x12 preamble, so getting this wrong is
+// silent: the tracker transmits, the console says TX MESHCOM, and
+// nothing on the mesh reacts.
+//
+// RadioLib has no raw 16-bit setter. Its SX126x::setSyncWord(sync, ctrl)
+// interleaves the two arguments as
+//     MSB = (sync & 0xF0) | ((ctrl & 0xF0) >> 4)
+//     LSB = ((sync & 0x0F) << 4) | (ctrl & 0x0F)
+// so 0x242b comes out of sync=0x22, ctrl=0x4b - the pair below is that
+// solved backwards, not a typo for 0x2b.
+static const uint8_t  MESHCOM_SYNC_WORD_SX127X = 0x2b;
+static const uint8_t  MESHCOM_SYNC_SX126X_WORD = 0x22;
+static const uint8_t  MESHCOM_SYNC_SX126X_CTRL = 0x4b;
+
 // Over-current protection. RadioLib's begin() leaves both families at
 // 60 mA, which would clamp the PA at full output. 140 mA is Semtech's
 // figure for +20 dBm PA_BOOST and is what the V1 firmware programmed
@@ -590,12 +608,19 @@ bool TrackerRadio::setMode(RadioMode m, const TrackerConfig &cfg,
     // beacon into the MeshCore passband.
     activeMode = RADIO_MODE_UNKNOWN;
 
-    const bool mesh = (m == RADIO_MODE_MESH);
-    const float    freq      = mesh ? cfg.meshFrequency : cfg.loraFrequency;
-    const float    bw        = mesh ? cfg.meshBandwidth : LORA_BW_KHZ;
-    const uint8_t  sf        = mesh ? (uint8_t)cfg.meshSf : LORA_SF;
-    const uint8_t  cr        = mesh ? (uint8_t)cfg.meshCr : LORA_CR;
-    const uint16_t preamble  = mesh ? (uint16_t)cfg.meshPreamble : LORA_PREAMBLE;
+    const bool meshCore = (m == RADIO_MODE_MESHCORE);
+    const bool meshCom  = (m == RADIO_MODE_MESHCOM);
+    const bool mesh = meshCore || meshCom;
+    const float    freq      = meshCore ? cfg.meshFrequency
+                              : (meshCom ? cfg.meshComFrequency : cfg.loraFrequency);
+    const float    bw        = meshCore ? cfg.meshBandwidth
+                              : (meshCom ? cfg.meshComBandwidth : LORA_BW_KHZ);
+    const uint8_t  sf        = meshCore ? (uint8_t)cfg.meshSf
+                              : (meshCom ? (uint8_t)cfg.meshComSf : LORA_SF);
+    const uint8_t  cr        = meshCore ? (uint8_t)cfg.meshCr
+                              : (meshCom ? (uint8_t)cfg.meshComCr : LORA_CR);
+    const uint16_t preamble  = meshCore ? (uint16_t)cfg.meshPreamble
+                              : (meshCom ? (uint16_t)cfg.meshComPreamble : LORA_PREAMBLE);
 
     // Bandwidth, spreading factor and coding rate live on the concrete
     // drivers rather than PhysicalLayer, so the branch is unavoidable.
@@ -606,12 +631,21 @@ bool TrackerRadio::setMode(RadioMode m, const TrackerConfig &cfg,
         if (state == RADIOLIB_ERR_NONE) state = radioSx127x.setSpreadingFactor(sf);
         if (state == RADIOLIB_ERR_NONE) state = radioSx127x.setCodingRate(cr);
         if (state == RADIOLIB_ERR_NONE) state = radioSx127x.setPreambleLength(preamble);
+        // Restored on every retune, not only on the way into MeshCom: the
+        // way back out carries 0x2b otherwise and silences APRS instead.
+        if (state == RADIOLIB_ERR_NONE)
+            state = radioSx127x.setSyncWord(meshCom ? MESHCOM_SYNC_WORD_SX127X
+                                                    : LORA_SYNC_WORD);
     } else {
         state = sx126->setFrequency(freq);
         if (state == RADIOLIB_ERR_NONE) state = sx126->setBandwidth(bw);
         if (state == RADIOLIB_ERR_NONE) state = sx126->setSpreadingFactor(sf);
         if (state == RADIOLIB_ERR_NONE) state = sx126->setCodingRate(cr);
         if (state == RADIOLIB_ERR_NONE) state = sx126->setPreambleLength(preamble);
+        if (state == RADIOLIB_ERR_NONE)
+            state = meshCom ? sx126->setSyncWord(MESHCOM_SYNC_SX126X_WORD,
+                                                 MESHCOM_SYNC_SX126X_CTRL)
+                            : sx126->setSyncWord(LORA_SYNC_WORD);
     }
     if (state != RADIOLIB_ERR_NONE) {
         snprintf(err, errLen, "%s retune failed (%d)", mesh ? "mesh" : "APRS", state);

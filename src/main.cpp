@@ -23,6 +23,7 @@
 #include "smartbeacon.h"
 #include "radio.h"
 #include "meshcore.h"
+#include "meshcom.h"
 
 // ============================================================
 // VERSION
@@ -124,6 +125,14 @@ static unsigned long lastCommentSent = 0;
 static bool          commentSent = false;
 static unsigned long lastMeshAdvert = 0;
 static bool          meshAdvertSent = false;
+static unsigned long lastMeshComAdvert = 0;
+// meshComInterval=smart: the mesh position follows the APRS beacon, no
+// closer together than this.
+static const unsigned long MESHCOM_SMART_FLOOR_MS = 60000UL;
+static bool meshComFollow = false;   // SmartBeacon fired, mesh frame owed
+static bool          meshComAdvertSent = false;
+static unsigned long lastMeshComHey = 0;
+static bool          meshComHeySent = false;
 
 static const uint16_t SEQ_COMMIT_EVERY = 64;
 static uint16_t sequence = 0;
@@ -426,7 +435,8 @@ static unsigned long alertLastSent = 0;
 static bool          alertSent = false;
 
 static void alertQueue(const char *text) {
-    if (!cfg.alertChannel[0] && !cfg.alertAprsCall[0]) return;   // nowhere to send
+    if (!cfg.alertChannel[0] && !cfg.alertAprsCall[0] &&
+        !cfg.alertMeshComCall[0]) return;   // nowhere to send
     if (alertCount == ALERT_SLOTS) {
         alertHead = (uint8_t)((alertHead + 1) % ALERT_SLOTS);
         alertCount--;
@@ -894,6 +904,20 @@ static void alertFlush() {
         sendAprsMessage(cfg.alertAprsCall, text);
         sent = true;
     }
+    // MeshCom needs no timestamp, so unlike the MeshCore channel this path
+    // also works indoors and before the first fix - which is exactly when a
+    // boot or watchdog alert is worth having.
+    if (cfg.alertMeshComCall[0] && cfg.meshComEnabled) {
+        char buf[160];
+        snprintf(buf, sizeof(buf), "TX MESHCOM PM %s: %s", cfg.alertMeshComCall, text);
+        purple(buf);
+        if (MeshCom::sendMessage(cfg, cfg.callsign, cfg.alertMeshComCall, text,
+                                 currentDrive())) {
+            sent = true;
+        } else {
+            red("MESHCOM PM FAILED");
+        }
+    }
 
     if (sent || !cfg.alertChannel[0]) {   // drop it either way rather than spin
         alertHead = (uint8_t)((alertHead + 1) % ALERT_SLOTS);
@@ -923,6 +947,64 @@ static void sendMeshAdvert(float lat, float lon) {
     lastMeshAdvert = millis();
     lastTxEnd      = millis();   // the battery sampler holds off after any keying, this one included
     meshAdvertSent = true;
+    watchdog_update();
+}
+
+// The percentage the rest of the mesh sends in /B=. There is no fuel gauge
+// on this board, only the supply rail, so this is an estimate and nothing
+// more: a straight line between the two thresholds the owner already tuned
+// for their own supply - battLowVoltage reads 0, battChargeVoltage reads
+// 100. It is not a state of charge, and on a vehicle it will sit at 100
+// whenever the alternator is running. Without a voltage reading configured
+// the field is left out instead of guessed.
+static int meshComBattPercent() {
+    if (!cfg.voltage) return -1;
+    const int lo = cfg.battLowVoltage;
+    const int hi = cfg.battChargeVoltage;
+    if (hi <= lo) return -1;
+
+    const int vx100 = (int)(getVoltage() * 100 + 0.5f);
+    int pct = (int)(((long)(vx100 - lo) * 100) / (hi - lo));
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+    return pct;
+}
+
+static void sendMeshComHey() {
+    digitalWrite(PIN_LED_LORA, HIGH);
+
+    int8_t drive = currentDrive();
+    char buf[96];
+    snprintf(buf, sizeof(buf), "TX MESHCOM HEY: %s (%d dBm)", cfg.callsign, drive);
+    purple(buf);
+
+    if (!MeshCom::sendHey(cfg, cfg.callsign, drive)) {
+        red("MESHCOM HEY FAILED");
+    }
+
+    digitalWrite(PIN_LED_LORA, LOW);
+    lastMeshComHey = millis();
+    meshComHeySent = true;
+}
+
+static void sendMeshComAdvert(float lat, float lon, float altM) {
+    digitalWrite(PIN_LED_LORA, HIGH);
+
+    int8_t drive = currentDrive();
+    char buf[128];
+    snprintf(buf, sizeof(buf), "TX MESHCOM: %s @ %.5f,%.5f (%d dBm)",
+             cfg.callsign, lat, lon, drive);
+    purple(buf);
+
+    if (!MeshCom::sendPosition(cfg, cfg.callsign, lat, lon, altM, drive,
+                               meshComBattPercent())) {
+        red("MESHCOM POSITION FAILED");
+    }
+
+    digitalWrite(PIN_LED_LORA, LOW);
+    lastMeshComAdvert = millis();
+    meshComFollow = false;
+    meshComAdvertSent = true;
     watchdog_update();
 }
 
@@ -1180,6 +1262,15 @@ void setup() {
     snprintf(cfgMsg, sizeof(cfgMsg), "Sequence start at: %d", sequence);
     yellow(cfgMsg);
 
+    // The MeshCom message id rides on the same persisted counter: a receiving
+    // node drops an id it has already seen, so the ids must not restart at
+    // the same place after every reboot. See src/meshcom.cpp.
+    // hwrand32() rather than the sequence alone: the sequence is only
+    // committed every SEQ_COMMIT_EVERY beacons, so a tracker that has never
+    // completed a block still reads 0 and would seed every boot identically -
+    // exactly the case this is meant to avoid.
+    MeshCom::begin(cfg.callsign, (uint16_t)(rp2040.hwrand32() ^ sequence));
+
     // LoRa init - the radio layer identifies the fitted chip itself
     yellow("Init LoRa");
 
@@ -1237,6 +1328,13 @@ void setup() {
                  "MeshCore: %.3f MHz BW%.1f SF%d CR4:%d, %s advert every %ds",
                  cfg.meshFrequency, cfg.meshBandwidth, cfg.meshSf, cfg.meshCr,
                  cfg.meshRoute, cfg.meshInterval);
+        yellow(cfgMsg);
+    }
+    if (cfg.meshComEnabled) {
+        snprintf(cfgMsg, sizeof(cfgMsg),
+                 "MeshCom: %.3f MHz BW%.1f SF%d CR4:%d hop=%d every %ds",
+                 cfg.meshComFrequency, cfg.meshComBandwidth, cfg.meshComSf,
+                 cfg.meshComCr, cfg.meshComMaxHop, cfg.meshComInterval);
         yellow(cfgMsg);
     }
 
@@ -1460,7 +1558,36 @@ void loop() {
     bool hasFix = gps.location.isValid() && gps.location.age() < 3000;
 
     // Update GPS LED (always)
-    if (!updateGpsLed(hasFix)) {
+    // Keep the LED honest first, then decide - the alert path below returns
+    // early, and skipping the blink for it would stall the no-fix pattern.
+    bool gpsUsable = updateGpsLed(hasFix);
+
+    // Alerts before the first fix.
+    //
+    // An alert carries no position, and the MeshCom path needs no timestamp
+    // either - alertFlush() already skips only the MeshCore channel when
+    // there is no GPS time. So a boot, watchdog or supply notice can go out
+    // with no fix at all, which is exactly when it is worth having: indoors,
+    // or on a bench with the GPS antenna off. Below the date gate it was
+    // unreachable, so the queue simply sat there until the tracker saw sky.
+    //
+    // Only while there is no fix: once GPS is up the pass further down owns
+    // the queue, and running both would put two frames in one loop pass.
+    //
+    // The inhibit has to be repeated here. The gate that normally covers
+    // every transmission sits below the date check, so this pass is ahead of
+    // it and would otherwise key the radio while the supply is still
+    // settling, during the startup hold, or on a port that asked for silence
+    // outright - the same reason the forced-metadata send above carries its
+    // own copy of the condition.
+    if (!hasFix && !metadataForced && alertPending() &&
+        !txInhibited() && !railSettling() && !startupHold()) {
+        alertFlush();
+        delay(50);
+        return;
+    }
+
+    if (!gpsUsable) {
         delay(50);
         return;
     }
@@ -1566,12 +1693,44 @@ void loop() {
     bool metadataDue = metadataForced || ((nowMs - lastMetadataSend) >= 86400000UL);
 
     bool alertDue = alertPending();
-    bool meshDue = cfg.meshEnabled && MeshCore::ready() &&
+    // gpsUnixTime() is part of the condition, not just of the send. An
+    // advert carries a timestamp and sendMeshAdvert() refuses to build one
+    // without real time - but it refuses by returning before it sets
+    // meshAdvertSent or lastMeshAdvert. Left out of the test, meshDue then
+    // stays true forever and the MeshCore branch below, which sits ahead of
+    // the MeshCom and alert branches and returns from the pass, swallows
+    // every single loop iteration: no mesh position, no alerts, nothing,
+    // with the console showing only that beacons still go out.
+    //
+    // Reachable on real hardware too, not only on a bench: the date gate
+    // above tests gps.date, while gpsUnixTime() also requires gps.time, so
+    // a receiver with a valid date and a not-yet-valid time lands exactly
+    // here.
+    bool meshDue = cfg.meshEnabled && MeshCore::ready() && gpsUnixTime() != 0 &&
                    (!meshAdvertSent ||
                     (nowMs - lastMeshAdvert) >= (unsigned long)cfg.meshInterval * 1000UL);
+    // In "smart" mode the mesh position is owed whenever SmartBeacon put one
+    // on APRS. It stays owed if the floor blocks it rather than being
+    // dropped, so a beacon burst still yields one mesh frame afterwards.
+    bool meshComDue;
+    if (cfg.meshComSmart) {
+        meshComDue = cfg.meshComEnabled && meshComFollow &&
+                     (!meshComAdvertSent ||
+                      (nowMs - lastMeshComAdvert) >= MESHCOM_SMART_FLOOR_MS);
+    } else {
+        meshComDue = cfg.meshComEnabled &&
+                     (!meshComAdvertSent ||
+                      (nowMs - lastMeshComAdvert) >=
+                          (unsigned long)cfg.meshComInterval * 1000UL);
+    }
+
+    bool heyDue = cfg.meshComEnabled && cfg.meshComHey &&
+                  (!meshComHeySent ||
+                   (nowMs - lastMeshComHey) >= MESHCOM_HEY_INTERVAL_MS);
 
     // Nothing to do?
-    if (!sendBeacon && pendingVoltAlert < 0 && !metadataDue && !meshDue && !alertDue) {
+    if (!sendBeacon && pendingVoltAlert < 0 &&
+        !metadataDue && !meshDue && !meshComDue && !alertDue && !heyDue) {
         delay(50);
         return;
     }
@@ -1583,6 +1742,20 @@ void loop() {
     // between the frames of something else. Yielding costs one 50 ms pass.
     if (meshDue && !sendBeacon && pendingVoltAlert < 0 && !metadataDue) {
         sendMeshAdvert(lat, lon);
+        delay(50);
+        return;
+    }
+
+    if (meshComDue && !sendBeacon && pendingVoltAlert < 0 && !metadataDue) {
+        sendMeshComAdvert(lat, lon, altM);
+        delay(50);
+        return;
+    }
+
+    // HEY last of the three, and behind the position: if both come due on
+    // the same pass the position is the one worth the airtime.
+    if (heyDue && !sendBeacon && pendingVoltAlert < 0 && !metadataDue) {
+        sendMeshComHey();
         delay(50);
         return;
     }
@@ -1654,9 +1827,15 @@ void loop() {
         // buys nothing - and it is a third of the frame. Timed rather than
         // counted, so the gap does not shrink to nothing at speed. The
         // first beacon of a session always carries it.
-        bool withComment = (cfg.commentInterval <= 0) || !commentSent ||
-                           (nowMs - lastCommentSent) >=
-                               (unsigned long)cfg.commentInterval * 1000UL;
+        // commentInterval=off silences the APRS free text completely,
+        // including the first beacon of a session. Nothing else changes:
+        // the telemetry and /A= that live in the same field still go out,
+        // because they are not the comment - they are the reason the field
+        // is there at all.
+        bool withComment = cfg.commentInterval != COMMENT_INTERVAL_OFF &&
+                           ((cfg.commentInterval == 0) || !commentSent ||
+                            (nowMs - lastCommentSent) >=
+                                (unsigned long)cfg.commentInterval * 1000UL);
         if (withComment) {
             lastCommentSent = nowMs;
             commentSent = true;
@@ -1754,6 +1933,9 @@ void loop() {
         purple(buf);
         loraSendText(frame);
         sb.updateAfterBeacon(lat, lon);
+        // Not sent from here: a retune must not land between this frame and
+        // whatever else this pass is doing. The next pass picks it up.
+        if (cfg.meshComSmart) meshComFollow = true;
     }
 
     // Metadata if due

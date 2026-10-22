@@ -158,6 +158,11 @@ place for chatter nobody asked for.
   where obscuring meaning is not permitted anyway.
 - **alertMention** - prefixed to the text, e.g. `@OR7F`
 - **alertAprsCall** - callsign to send an APRS message to, e.g. `OR7F-1`
+- **alertMeshComCall** - MeshCom destination for the same alerts, sent as a
+  private message. A callsign (`OR7F-90`), a group number (`9`), or `*` for
+  MeshCom's "Messages to All". Needs `meshComEnabled=true`. Unlike the
+  MeshCore channel this needs no clock, so boot and watchdog alerts go out
+  before the first GPS fix
 - **alertInterval** - minimum seconds between alerts, default `60`
 
 What gets sent: the supply moving, the battery falling and recovering,
@@ -190,13 +195,18 @@ the firmware sends what it always has unless you change it:
 - **aprsAltitude** - `false` drops the `/A=` field.
 
 - **commentInterval** - seconds between comments (default `1800`, half an
-  hour), or `always` to send it on every beacon. aprs.fi keeps the last comment it
+  hour), `always` to send it on every beacon, or `off` for none at all. aprs.fi keeps the last comment it
   received and, per its author, only forgets it "if you still transmit
   packets without a comment after 7 days", so half an hour has a 336x
   margin. The comment is a third of the frame, so this recovers about 30%
   of the airtime; an hour instead of half buys only a further 2%. It is
   seconds rather than a beacon count deliberately - a count would shrink
   the gap to a few minutes at speed, which is when airtime is scarcest.
+  `off` removes the free text from every beacon including the first; the
+  telemetry and `/A=` in the same field are unaffected, since they are not
+  the comment. A station running MeshCom as well can leave `comment=` set
+  and silence only the APRS side that way - the MeshCom position picks the
+  same text up and prefixes it, so the description still reaches the map.
 
 Altitude is free while stationary. The compressed position's `cs` field
 carries either course/speed or altitude, and APRS 1.0.1 (chapter 9) says
@@ -231,9 +241,72 @@ and an advert has no room for it either.
   because a repeater gates a position before deciding whether to forward it,
   but keeps a moving station from re-flooding the whole mesh.
 - **meshInterval** - seconds between adverts (default `900`)
+- **meshComEnabled** - enable tx-only MeshCom position beacons (`true`/`false`,
+  default `false`)
+- **meshComInterval** - seconds between MeshCom beacons (default `900`), or
+  `smart` to send one whenever the APRS SmartBeacon fires, with a 60 s floor
+- **meshComMaxHop** - MeshCom hop count for positions (0..7, default `2`)
+- **meshComHopText** - hop count for messages and the HEY probe (0..7,
+  default `4`). MeshCom splits the two; positions travel less far than text.
+- **meshComName** - station name, sent as `#name` at the end of the
+  position's free text. Every node on the mesh carries one, and a node with
+  no comment still sends `#name`, so this is the field that matters.
+- **meshComComment** - free text ahead of the name, 25 characters. `{ } : ;
+  , /` are dropped because MeshCom's own parsers read them as delimiters,
+  and a space ends the field at the receiver - write `Meshcom-Region`,
+  not `Meshcom Region`. `Meshcom-` is prefixed automatically unless the
+  text is sent exactly as written, and an empty setting falls back to plain
+  `Meshcom`. Both paths reach APRS-IS under the same callsign, so this is
+  the only thing on the map that says which one a position came through -
+  which is why the fallback names the network, and why nothing is prefixed
+  to a comment you did set: `vMesh` says the same in five of the 25
+  characters. It is a separate key from **comment** rather than a copy of
+  it because that one is written for a different map, may be 64 characters
+  long, and is often a URL - and `:` and `/` do not survive the filter.
+- **meshComGroups** - group subscriptions, e.g. `9;262;`, sent as `/R=` at
+  the end of the position. Empty by default, and that is a legitimate
+  setting rather than an omission: upstream leaves the field out entirely
+  for a node with no groups. Consider that this tracker cannot receive, so
+  a declared group asks the server to route group traffic at a station that
+  will never hear it.
+- **meshComHey** - send the HEY probe every 15 minutes (default `true`).
+  HEY asks the mesh who can hear this station: every node that relays it
+  appends its own RSSI/SNR report, so the answer accumulates in the frame
+  and reaches a gateway even though this board cannot receive. Upstream
+  damps HEY with a trickle timer that needs a receiver, so this sends at
+  the slow end of that ramp only - never more often than a real node.
+- **meshComHardwareId** - MeshCom HWID in the frame trailer (0..127,
+  default `1` = TLORA_V2). This board has no id of its own, so it reports
+  the closest plain SX127x node. `0` is MeshCom's "no info" and a station
+  sending it may not reach the map through a gateway. Other useful values:
+  `2` TLORA_V1, `3` TLORA_V2_1_1p6, `4` TBEAM, `7` T_ECHO, `9` RAK4631.
+- **meshComFrequency** / **meshComBandwidth** / **meshComSf** /
+  **meshComCr** / **meshComPreamble** - MeshCom RF profile (defaults:
+  433.175 MHz, 250 kHz, SF11, CR4:6, preamble 8). The preamble picks the
+  country the station reports: 8 is MeshCom's "EU8" profile, which the ham
+  networks on this band run, and 32 is its plain "EU". They differ in
+  nothing else, but a station on 32 among neighbours on 8 stands out in
+  every MHeard list.
 
 Adverts wait for a GPS fix: MeshCore stamps them with real time and the
 tracker has no clock of its own, so there is no mesh presence indoors.
+
+### MeshCom
+
+The tracker can also send tx-only MeshCom position frames, similar to MeshCore:
+it retunes the radio to a dedicated MeshCom profile for one frame, transmits,
+then returns to APRS. MeshCom and MeshCore transmissions are scheduled on their
+own loop passes so profile switches never land between APRS frames.
+
+MeshCom uses its own sync word (0x2b), not the 0x12 that APRS and MeshCore
+share, so the profile switch changes that too and puts it back afterwards.
+
+Besides positions it can send private messages: set `alertMeshComCall` and
+the tracker's alerts - boot, watchdog reset, supply steps, low battery -
+arrive as MeshCom messages. A node only files a message it can address:
+its own callsign, a group it has joined, or `*`. One addressed elsewhere is
+still received and logged, so a message that shows up as passing traffic
+but not in the mailbox is a destination problem, not a framing one.
 
 ### What `power` means depends on the board
 

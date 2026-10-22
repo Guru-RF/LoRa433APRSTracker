@@ -110,6 +110,7 @@ extern FS FatFS;
 #define DEFAULT_ALERT_CHANNEL  ""     // MeshCore public channel, e.g. #mbox
 #define DEFAULT_ALERT_MENTION  ""     // prefixed to the text, e.g. @OR7F
 #define DEFAULT_ALERT_APRS     ""     // APRS callsign to message, e.g. OR7F-1
+#define DEFAULT_ALERT_MESHCOM  ""     // MeshCom callsign to PM, e.g. OR7F-90
 #define DEFAULT_ALERT_INTERVAL 60     // minimum seconds between alerts
 
 #define DEFAULT_SB_PARKED_AFTER  14400  // 4 hours
@@ -129,8 +130,12 @@ extern FS FatFS;
 // buys a further 2%, so there is no reason to push it.
 //
 // "always" (or 0) sends it on every beacon, for a network whose consumers
-// do not cache it the way aprs.fi does.
+// do not cache it the way aprs.fi does. "off" drops it from the APRS
+// beacon entirely - for a station whose free text lives on the MeshCom
+// side, where the position carries a prefixed copy of the same comment
+// and the network has no aprs.fi to cache it.
 #define DEFAULT_COMMENT_INTERVAL 1800
+#define COMMENT_INTERVAL_OFF     (-1)
 
 #define DEFAULT_MESH_ENABLED   false
 #define DEFAULT_MESH_NAME      "NOCALL"
@@ -151,6 +156,62 @@ extern FS FatFS;
 #define DEFAULT_MESH_SF        8
 #define DEFAULT_MESH_CR        8
 #define DEFAULT_MESH_PREAMBLE  16
+// --- MeshCom (tx-only position beacon) ---
+#define DEFAULT_MESHCOM_ENABLED    false
+#define DEFAULT_MESHCOM_INTERVAL   900
+#define DEFAULT_MESHCOM_SMART      false
+#define DEFAULT_MESHCOM_MAX_HOP    2
+// Upstream carries two hop limits, not one: initAPRS() gives ':' and '@'
+// max_hop_text and everything else max_hop_pos. Every node on the air here
+// shows the same split - positions at H02, messages and HEY at H04.
+#define DEFAULT_MESHCOM_HOP_TEXT   4
+// HEY, the "who hears me" probe, at the rate a normal node settles on.
+// Upstream damps it with a trickle timer (docs/hey-supp.md: Imin 30 s,
+// doubling to Imax 15 min, suppressed when two neighbours' HEYs were
+// heard). A receiver is what makes that safe, and this board has none, so
+// it can never suppress - running the fast end of the ramp would put it on
+// the air more often than any real node. It sends at Imax only.
+#define DEFAULT_MESHCOM_HEY        true
+// The free-text segment of a position: comment, then the name behind a
+// '#'. PositionToAPRS() builds it that way and a node with no comment
+// still sends "#name", so the name is the part that carries.
+#define DEFAULT_MESHCOM_NAME       ""
+// Sent verbatim, 25 characters, and empty falls back to "Meshcom" - the
+// position has to say which network it came out of, because both paths
+// reach APRS-IS under the same callsign and nothing else there does. Not
+// shared with the APRS comment: that one is written for a different map,
+// is four times longer, and is usually a URL, whose ':' and '/' this
+// field's filter removes.
+#define DEFAULT_MESHCOM_COMMENT    ""
+// Group subscriptions, sent as /R=9;262; at the very end of the position.
+// Empty by default and legitimately so: PositionToAPRS() only emits the
+// field when the node has at least one group, and this radio cannot
+// receive, so declaring a group asks the server to route traffic at a
+// station that will never hear it.
+#define DEFAULT_MESHCOM_GROUPS     ""
+#define MESHCOM_HEY_INTERVAL_MS    900000UL
+#define DEFAULT_MESHCOM_FREQ       433.175f
+#define DEFAULT_MESHCOM_BW         250.0f
+#define DEFAULT_MESHCOM_SF         11
+#define DEFAULT_MESHCOM_CR         6
+// 8, not the 32 of MeshCom's DEFAULT_PREAMPLE_LENGTH. That constant is the
+// "EU" country profile; the ham networks on this frequency run "EU8",
+// whose entry in lora_setcountry() is labelled "EU Preabble 8" and sets
+// node_preamplebits = 8. The two differ in nothing else. Sending 32 is
+// received perfectly well - a longer preamble always is - but it makes the
+// station the only one on the air with a different profile, and it says so
+// out loud: the country nibble of the modulation byte reads 0 (EU) where
+// every neighbour reads 8 (EU8). It also costs 24 symbols, 197 ms at
+// SF11/250 kHz, on every single frame.
+#define DEFAULT_MESHCOM_PREAMBLE   8
+// The hardware id a receiving node looks up in its own table
+// (mheard_functions.cpp getHardwareLong(): 1 TLORA_V2, 2 TLORA_V1,
+// 3 TLORA_V2_1_1p6, 4 TBEAM, 7 T_ECHO, 8 TDECK, 9 RAK4631 ... and a remap
+// for the ids above 38). This board is not in that table, so it borrows the
+// closest plain SX127x node: id 0 is literally "no info", and a station that
+// reports it is at best displayed as unknown hardware and at worst dropped
+// by the gateways on the way to the map.
+#define DEFAULT_MESHCOM_HWID       1
 // Refuse to transmit at all while a computer is attached, rather than
 // dropping to usbPaDrive. For a port that cannot supply even the
 // floor drive.
@@ -258,6 +319,7 @@ struct TrackerConfig {
     char   alertChannel[20];
     char   alertMention[16];
     char   alertAprsCall[16];
+    char   alertMeshComCall[16];
     int    alertInterval;
     int    sbParkedAfter;
     int    sbParkedRate;
@@ -272,6 +334,21 @@ struct TrackerConfig {
     int    meshSf;
     int    meshCr;
     int    meshPreamble;
+    bool   meshComEnabled;
+    int    meshComInterval;
+    bool   meshComSmart;   // follow SmartBeacon instead of the interval
+    int    meshComMaxHop;
+    int    meshComHopText;
+    bool   meshComHey;
+    char   meshComName[16];
+    char   meshComComment[32];
+    char   meshComGroups[32];
+    int    meshComHardwareId;
+    float  meshComFrequency;
+    float  meshComBandwidth;
+    int    meshComSf;
+    int    meshComCr;
+    int    meshComPreamble;
     float  loraFrequency;
     char   radioChip[12];
     char   loraTcxo[8];
@@ -335,6 +412,7 @@ static void configSetDefaults(TrackerConfig &cfg) {
     strncpy(cfg.alertChannel, DEFAULT_ALERT_CHANNEL, sizeof(cfg.alertChannel));
     strncpy(cfg.alertMention, DEFAULT_ALERT_MENTION, sizeof(cfg.alertMention));
     strncpy(cfg.alertAprsCall, DEFAULT_ALERT_APRS, sizeof(cfg.alertAprsCall));
+    strncpy(cfg.alertMeshComCall, DEFAULT_ALERT_MESHCOM, sizeof(cfg.alertMeshComCall));
     cfg.alertInterval = DEFAULT_ALERT_INTERVAL;
     cfg.sbParkedAfter = DEFAULT_SB_PARKED_AFTER;
     cfg.sbParkedRate = DEFAULT_SB_PARKED_RATE;
@@ -349,6 +427,21 @@ static void configSetDefaults(TrackerConfig &cfg) {
     cfg.meshSf = DEFAULT_MESH_SF;
     cfg.meshCr = DEFAULT_MESH_CR;
     cfg.meshPreamble = DEFAULT_MESH_PREAMBLE;
+    cfg.meshComEnabled = DEFAULT_MESHCOM_ENABLED;
+    cfg.meshComInterval = DEFAULT_MESHCOM_INTERVAL;
+    cfg.meshComSmart = DEFAULT_MESHCOM_SMART;
+    cfg.meshComMaxHop = DEFAULT_MESHCOM_MAX_HOP;
+    cfg.meshComHopText = DEFAULT_MESHCOM_HOP_TEXT;
+    cfg.meshComHey = DEFAULT_MESHCOM_HEY;
+    strncpy(cfg.meshComName, DEFAULT_MESHCOM_NAME, sizeof(cfg.meshComName) - 1);
+    strncpy(cfg.meshComComment, DEFAULT_MESHCOM_COMMENT, sizeof(cfg.meshComComment) - 1);
+    strncpy(cfg.meshComGroups, DEFAULT_MESHCOM_GROUPS, sizeof(cfg.meshComGroups) - 1);
+    cfg.meshComHardwareId = DEFAULT_MESHCOM_HWID;
+    cfg.meshComFrequency = DEFAULT_MESHCOM_FREQ;
+    cfg.meshComBandwidth = DEFAULT_MESHCOM_BW;
+    cfg.meshComSf = DEFAULT_MESHCOM_SF;
+    cfg.meshComCr = DEFAULT_MESHCOM_CR;
+    cfg.meshComPreamble = DEFAULT_MESHCOM_PREAMBLE;
     cfg.loraFrequency = DEFAULT_LORA_FREQ;
     strncpy(cfg.radioChip, DEFAULT_RADIO_CHIP, sizeof(cfg.radioChip));
     strncpy(cfg.loraTcxo, DEFAULT_LORA_TCXO, sizeof(cfg.loraTcxo));
@@ -447,9 +540,15 @@ static void configSetValue(TrackerConfig &cfg, const char *key, const char *val)
     } else if (strcasecmp(key, "commentInterval") == 0) {
         // A word or a number of seconds, the same way loraTcxo takes
         // "auto" or a voltage. "always" is what an operator reaches for;
-        // 0 is what it means.
+        // 0 is what it means. "off" is the other end and needs a word of
+        // its own rather than a number, because 0 is already taken by its
+        // opposite - "commentInterval=0" reading as "never" is exactly the
+        // kind of near-miss that goes unnoticed in the field.
         if (strcasecmp(val, "always") == 0) {
             cfg.commentInterval = 0;
+        } else if (strcasecmp(val, "off") == 0 || strcasecmp(val, "never") == 0 ||
+                   strcasecmp(val, "none") == 0) {
+            cfg.commentInterval = COMMENT_INTERVAL_OFF;
         } else {
             cfg.commentInterval = constrain(atoi(val), 0, 86400);
         }
@@ -476,6 +575,9 @@ static void configSetValue(TrackerConfig &cfg, const char *key, const char *val)
     } else if (strcasecmp(key, "alertAprsCall") == 0) {
         strncpy(cfg.alertAprsCall, val, sizeof(cfg.alertAprsCall) - 1);
         for (char *q = cfg.alertAprsCall; *q; q++) *q = toupper(*q);
+    } else if (strcasecmp(key, "alertMeshComCall") == 0) {
+        strncpy(cfg.alertMeshComCall, val, sizeof(cfg.alertMeshComCall) - 1);
+        for (char *q = cfg.alertMeshComCall; *q; q++) *q = toupper(*q);
     } else if (strcasecmp(key, "alertInterval") == 0) {
         cfg.alertInterval = constrain(atoi(val), 10, 3600);
     } else if (strcasecmp(key, "sbParkedAfter") == 0) {
@@ -515,6 +617,50 @@ static void configSetValue(TrackerConfig &cfg, const char *key, const char *val)
         cfg.meshCr = constrain(atoi(val), 5, 8);
     } else if (strcasecmp(key, "meshPreamble") == 0) {
         cfg.meshPreamble = constrain(atoi(val), 6, 64);
+    } else if (strcasecmp(key, "meshComEnabled") == 0) {
+        cfg.meshComEnabled = (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0);
+    } else if (strcasecmp(key, "meshComInterval") == 0) {
+        // A number of seconds, or "smart" to hang the mesh position off the
+        // same SmartBeacon decision that drives APRS - the same way
+        // commentInterval takes "always". "smart" ignores this number and
+        // uses MESHCOM_SMART_FLOOR_S as its floor instead, so a vehicle
+        // beaconing every 60 s in traffic cannot flood the mesh.
+        if (strcasecmp(val, "smart") == 0) {
+            cfg.meshComSmart = true;
+        } else {
+            cfg.meshComSmart = false;
+            cfg.meshComInterval = constrain(atoi(val), 60, 86400);
+        }
+    } else if (strcasecmp(key, "meshComMaxHop") == 0) {
+        cfg.meshComMaxHop = constrain(atoi(val), 0, 7);
+    } else if (strcasecmp(key, "meshComHopText") == 0) {
+        cfg.meshComHopText = constrain(atoi(val), 0, 7);
+    } else if (strcasecmp(key, "meshComName") == 0) {
+        strncpy(cfg.meshComName, val, sizeof(cfg.meshComName) - 1);
+    } else if (strcasecmp(key, "meshComComment") == 0) {
+        strncpy(cfg.meshComComment, val, sizeof(cfg.meshComComment) - 1);
+    } else if (strcasecmp(key, "meshComGroups") == 0) {
+        strncpy(cfg.meshComGroups, val, sizeof(cfg.meshComGroups) - 1);
+    } else if (strcasecmp(key, "meshComHey") == 0) {
+        cfg.meshComHey = (strcasecmp(val, "true") == 0 || strcmp(val, "1") == 0);
+    } else if (strcasecmp(key, "meshComHardwareId") == 0) {
+        cfg.meshComHardwareId = constrain(atoi(val), 0, 127);
+    } else if (strcasecmp(key, "meshComFrequency") == 0) {
+        cfg.meshComFrequency = constrain((float)atof(val), 430.0f, 434.960f);
+    } else if (strcasecmp(key, "meshComBandwidth") == 0) {
+        float bw = (float)atof(val);
+        const float ok[] = { 7.8f, 10.4f, 15.6f, 20.8f, 31.25f,
+                             41.7f, 62.5f, 125.0f, 250.0f, 500.0f };
+        cfg.meshComBandwidth = DEFAULT_MESHCOM_BW;
+        for (unsigned i = 0; i < sizeof(ok) / sizeof(ok[0]); i++) {
+            if (fabsf(bw - ok[i]) < 0.01f) { cfg.meshComBandwidth = bw; break; }
+        }
+    } else if (strcasecmp(key, "meshComSf") == 0) {
+        cfg.meshComSf = constrain(atoi(val), 6, 12);
+    } else if (strcasecmp(key, "meshComCr") == 0) {
+        cfg.meshComCr = constrain(atoi(val), 5, 8);
+    } else if (strcasecmp(key, "meshComPreamble") == 0) {
+        cfg.meshComPreamble = constrain(atoi(val), 6, 64);
     } else if (strcasecmp(key, "loraFrequency") == 0) {
         cfg.loraFrequency = atof(val);
     } else if (strcasecmp(key, "radioChip") == 0) {
@@ -632,6 +778,7 @@ static const char *CONFIG_TEMPLATE =
     "alertChannel=\n"
     "alertMention=\n"
     "alertAprsCall=\n"
+    "alertMeshComCall=\n"
     "alertInterval=60\n"
     "\n"
     "# --- Parked ---\n"
@@ -645,7 +792,7 @@ static const char *CONFIG_TEMPLATE =
     "# on arrival anyway, and this tracker cannot receive messages.\n"
     "aprsTimestamp=true\n"
     "aprsAltitude=true\n"
-    "# Seconds between comments, or \"always\". aprs.fi caches for 7 days.\n"
+    "# Seconds between comments, \"always\", or \"off\" for none at all.\n"
     "commentInterval=1800\n"
     "\n"
     "# --- MeshCore (IARU R1 ham profile, 70cm) ---\n"
@@ -657,6 +804,22 @@ static const char *CONFIG_TEMPLATE =
     "# direct still reaches APRS-IS without re-flooding the mesh\n"
     "meshRoute=direct\n"
     "meshInterval=900\n"
+    "\n"
+    "# --- MeshCom (tx-only position beacon) ---\n"
+    "meshComEnabled=false\n"
+    "meshComInterval=900\n"
+    "meshComMaxHop=2\n"
+    "meshComHopText=4\n"
+    "meshComHey=true\n"
+    "meshComName=\n"
+    "meshComComment=\n"
+    "meshComGroups=\n"
+    "meshComHardwareId=1\n"
+    "meshComFrequency=433.175\n"
+    "meshComBandwidth=250.0\n"
+    "meshComSf=11\n"
+    "meshComCr=6\n"
+    "meshComPreamble=8\n"
     "\n"
     "# --- Debug ---\n"
     "fullDebug=false\n";
@@ -738,6 +901,8 @@ static bool configCreateDefault() {
     f.println("alertChannel=");
     f.println("alertMention=");
     f.println("alertAprsCall=");
+    f.println("# MeshCom destination for alerts: a callsign, a group number, or *");
+    f.println("alertMeshComCall=");
     f.println("alertInterval=60");
     f.println("");
     f.println("# --- Parked ---");
@@ -751,7 +916,7 @@ static bool configCreateDefault() {
     f.println("# timestamp off sends '!' instead of '@ddhhmmz'.");
     f.println("aprsTimestamp=true");
     f.println("aprsAltitude=true");
-f.println("# Seconds between comments, or \"always\". aprs.fi caches for 7 days.");
+    f.println("# Seconds between comments, \"always\", or \"off\" for none.");
     f.println("commentInterval=1800");
     f.println("");
     watchdog_update();
@@ -764,6 +929,30 @@ f.println("# Seconds between comments, or \"always\". aprs.fi caches for 7 days.
     f.println("# direct still reaches APRS-IS without re-flooding the mesh");
     f.println("meshRoute=direct");
     f.println("meshInterval=900");
+    f.println("");
+    f.println("# --- MeshCom (tx-only position beacon) ---");
+    f.println("meshComEnabled=false");
+    f.println("# seconds, or \"smart\" to follow the APRS SmartBeacon");
+    f.println("meshComInterval=900");
+    f.println("meshComMaxHop=2");
+    f.println("# hop count for messages and HEY, as upstream splits them");
+    f.println("meshComHopText=4");
+    f.println("# the \"who hears me\" probe every 15 min, like a normal node");
+    f.println("meshComHey=true");
+    f.println("# station name, sent as #name - every real node has one");
+    f.println("meshComName=");
+    f.println("# free text, max 25 chars; avoid spaces, receivers cut there");
+    f.println("# sent verbatim, e.g. vMesh; empty falls back to \"Meshcom\"");
+    f.println("meshComComment=");
+    f.println("# group subscriptions, e.g. 9;262; - see the README before setting");
+    f.println("meshComGroups=");
+    f.println("# 1=TLORA_V2 - this board is not in MeshCom's own table");
+    f.println("meshComHardwareId=1");
+    f.println("meshComFrequency=433.175");
+    f.println("meshComBandwidth=250.0");
+    f.println("meshComSf=11");
+    f.println("meshComCr=6");
+    f.println("meshComPreamble=8");
     f.println("");
     f.println("fullDebug=false");
     f.close();

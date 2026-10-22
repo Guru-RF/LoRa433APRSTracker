@@ -192,7 +192,7 @@ bool MeshCore::sendAdvert(const TrackerConfig &cfg, float lat, float lon,
     // tracker was power-cycled.
     char err[64];
     bool ok = false;
-    if (TrackerRadio::setMode(RADIO_MODE_MESH, cfg, err, sizeof(err))) {
+    if (TrackerRadio::setMode(RADIO_MODE_MESHCORE, cfg, err, sizeof(err))) {
         TrackerRadio::setDrive(drive);
         // Bracket the transmission with the amplifier enable exactly as
         // loraSendText() does. GP2 is unconnected on V2 so this changes
@@ -283,7 +283,7 @@ bool MeshCore::sendChannelText(const TrackerConfig &cfg, const char *channel,
 
     char err[64];
     bool ok = false;
-    if (TrackerRadio::setMode(RADIO_MODE_MESH, cfg, err, sizeof(err))) {
+    if (TrackerRadio::setMode(RADIO_MODE_MESHCORE, cfg, err, sizeof(err))) {
         TrackerRadio::setDrive(drive);
         bool needPa = cfg.hasPa || TrackerRadio::hasModulePa();
         if (needPa) { digitalWrite(PIN_PA, HIGH); delay(250); watchdog_update(); }

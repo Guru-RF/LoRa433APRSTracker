@@ -85,6 +85,9 @@ battSettle=5
 alertChannel=
 alertMention=
 alertAprsCall=
+# MeshCom destination for the same alerts, as a private message: a callsign,
+# a group number, or * for "Messages to All". Needs meshComEnabled=true.
+alertMeshComCall=
 alertInterval=60
 
 # --- Parked ---
@@ -99,7 +102,10 @@ sbParkedRate=1800
 aprsTimestamp=true
 aprsAltitude=true
 # Seconds between comments - it is a third of the frame, and aprs.fi
-# keeps the last one it saw for 7 days. Or "always" for every beacon.
+# keeps the last one it saw for 7 days. Or "always" for every beacon,
+# or "off" for none at all - telemetry and /A= are unaffected. A station
+# that describes itself on MeshCom instead can leave APRS silent here and
+# still keep "comment=" set: the MeshCom position picks it up.
 commentInterval=1800
 
 # --- MeshCore (IARU R1 ham profile, 70cm) ---
@@ -111,6 +117,44 @@ meshNodeType=chat
 # direct still reaches APRS-IS without re-flooding the mesh
 meshRoute=direct
 meshInterval=900
+
+# --- MeshCom (tx-only position beacon and messages) ---
+meshComEnabled=false
+# seconds, or "smart" to follow the APRS SmartBeacon (60s floor)
+meshComInterval=900
+meshComMaxHop=2
+# messages and HEY carry their own hop count upstream; positions use the
+# shorter one above
+meshComHopText=4
+# the "who hears me" probe, every 15 minutes as a normal node settles on
+meshComHey=true
+# Station name, sent as #name after the comment. Every real node carries
+# one, and a node without a comment still sends "#name".
+meshComName=
+# Free text, max 25 chars. { } : ; , / are dropped, and a space truncates
+# the field at the receiver - that is why stations write Meshcom-Region
+# rather than "Meshcom Region". The text is sent verbatim, so it is worth
+# saying which network it came out of - the callsign alone does not, e.g.
+# meshComComment=vMesh. Empty falls back to "Meshcom".
+meshComComment=
+# Group subscriptions, e.g. 9;262; - sent as /R= at the end of the position.
+# Empty is legitimate: upstream omits the field entirely without groups, and
+# this radio cannot receive, so a declared group asks the server to route
+# traffic at a station that will never hear it.
+meshComGroups=
+# 1=TLORA_V2. This board is not in MeshCom's hardware table, so it borrows
+# the closest plain SX127x node - 0 means "no info" and may not be shown.
+meshComHardwareId=1
+# MeshCom's own profile - note the sync word differs from APRS and is
+# handled in firmware, not here
+meshComFrequency=433.175
+meshComBandwidth=250.0
+meshComSf=11
+meshComCr=6
+# 8 = the EU8 country profile the ham networks on this band actually run.
+# 32 is MeshCom's "EU" default and makes this the only station on the air
+# with a different profile - visible as country 0 in the modulation byte.
+meshComPreamble=8
 
 # --- Debug ---
 fullDebug=false
