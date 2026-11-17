@@ -103,9 +103,10 @@ static bool meshComPayload(char *out, size_t outLen, const TrackerConfig &cfg,
     // The comment is filtered and capped the way upstream's
     // charset_filter does it for this field: 25 characters, and the six
     // bytes its own parsers read as delimiters are dropped. A space is
-    // *not* one of them upstream, but decodeAPRSPOS() ends the field at
-    // the first one, so a comment with a space arrives truncated - the
-    // reason real stations here write "Meshcom-Region".
+    // *not* one of them upstream: 4.35s ended the field at the first space,
+    // while 4.40a's decodeAPRSPOS() reads up to the first /X= tag and
+    // splits on the last '#'. Older nodes still truncate at a space, which
+    // is why real stations here write "Meshcom-Region".
     char text[40] = "";
     size_t tp = 0;
     for (const char *p = cfg.meshComComment; *p && tp < sizeof(text) - 1; p++) {
@@ -217,21 +218,24 @@ static size_t meshComFrame(uint8_t *frame, size_t frameLen,
     // The firmware-version byte is a protocol generation, not a product
     // label, and three receivers read it rather than print it:
     //
-    //   aprs_functions.cpp:496  1..34 -> the whole frame is discarded,
+    //   aprs_functions.cpp:542  1..34 -> the whole frame is discarded,
     //                           "Packet discarded, wrong FW-version"
-    //   lora_functions.cpp:763  >13   -> /A= is treated as feet and
-    //   loop_functions.cpp:2992          converted to metres for display
+    //   lora_functions.cpp:1599 >13   -> /A= is treated as feet and
+    //   loop_functions.cpp:3606          converted to metres for display
     //
     // Sending this board's own 2.1 as "2" therefore put it in the discard
     // window of every current node, and left the altitude unconverted on
     // the ones old enough to accept it - 541 m arriving as "1775 m", which
-    // is the sort of implausibility a map has every reason to drop. So the
-    // value here is the generation the network requires to talk to us at
-    // all; the sub-version byte after the FCS is where this firmware
-    // identifies itself.
-    frame[n++] = 35;
+    // is the sort of implausibility a map has every reason to drop.
+    //
+    // In 4.40a, nbrNoteFw() and nbrBuildDirectInfo() also record both the
+    // version (40 = 4.40) and the sub-version letter ('a'..'z' -> 1..26) in
+    // the neighbour matrix for MHeard, Path and phone views, treating '#'
+    // as unknown. So the trailer carries 40 and 'a' to match current
+    // 4.40a nodes on the air.
+    frame[n++] = 40;
     frame[n++] = (uint8_t)(0x80 | hw);
-    frame[n++] = 0x23;  // '#'
+    frame[n++] = 'a';
     frame[n++] = 0x7E;
     return n;
 }

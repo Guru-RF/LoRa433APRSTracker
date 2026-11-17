@@ -295,9 +295,10 @@ exactly that reason. Both are now verified against
   `#name`. That is why frames like `...31Ev#Anhaenger/B=100/...` appear on
   the air with the symbol immediately followed by a `#`. The comment is
   capped at 25 characters and `charset_filter` drops `{ } : ; , /` from it.
-  A space survives that filter but still breaks the field, because
-  `decodeAPRSPOS()` ends the free text at the first space - which is why
-  every station in this network writes its comment with hyphens.
+  A space survives that filter: 4.35s ended the free text at the first
+  space, while 4.40a's `decodeAPRSPOS()` reads up to the first `/X=` tag
+  and splits on the last `#`. Older nodes still truncate at a space, which
+  is why every station in this network writes its comment with hyphens.
 - **`meshComComment` is sent verbatim, and empty falls back to
   `Meshcom`.** Two earlier versions of this field did more and both were
   wrong. Inheriting the APRS `comment` when the key is empty looks tidy -
@@ -315,39 +316,33 @@ exactly that reason. Both are now verified against
   it silences the APRS free text, telemetry and `/A=` excepted, for a
   station that would rather spend those bytes.
 - **The firmware-version byte in the trailer is a protocol generation.**
-  Three receivers read it: `aprs_functions.cpp:496` discards the entire
+  Three receivers read it: `aprs_functions.cpp:542` discards the entire
   frame when it is 1..34 ("Packet discarded, wrong FW-version"), and
-  `lora_functions.cpp:763` and `loop_functions.cpp:2992` treat `/A=` as
+  `lora_functions.cpp:1599` and `loop_functions.cpp:3606` treat `/A=` as
   feet and convert it only when it is above 13. This firmware sent its own
   2.1 as `2`, which put it inside the discard window of every current node
   and left 541 m displaying as "1775" on the older ones that still
-  accepted it. It now sends 35. Nodes built before that check went in
+  accepted it. It now sends 40. Nodes built before that check went in
   accept anything, which is why a bench pair on February and April builds
   showed nothing wrong.
 
-  What 35 *says* is "4.35": `shortVERSION()` is
-  `memcpy(cfw, SOURCE_VERSION+2, 2)` over `SOURCE_VERSION "4.35"`, so the
+  What 40 *says* is "4.40": `shortVERSION()` is
+  `memcpy(cfw, SOURCE_VERSION+2, 2)` over `SOURCE_VERSION "4.40"`, so the
   byte is only the part after the dot and the major version is never
-  transmitted at all. 35 is therefore not a version this board picked but
-  the network's current floor - the discard test is `< 35`, so anything
-  lower is refused and anything higher claims a generation that does not
-  exist yet. It has to be raised in step with upstream whenever that
-  constant moves.
+  transmitted at all. The discard floor remains `< 35`, and in 4.40a
+  `nbrNoteFw()` (`src/nbr_matrix.cpp`) also records this byte in the
+  neighbour matrix and displays it as `v4.%02u%c` on the WebUI MHeard and
+  Path pages. It has to be raised in step with upstream whenever
+  `SOURCE_VERSION` moves.
 
-  The sub-version byte after the FCS is uninterpreted, and `'#'` is the
-  network's own word for "not stated". Upstream sends
-  `SOURCE_VERSION_SUB`, a letter (`"s"` in dev as of 2026-09), but nothing
-  in the node firmware ever compares the received byte: it is printed
-  (`printBuffer_aprs`, as `FW:%02i:%c`) and forwarded to the server as the
-  JSON string `fw_sub` (`extudp_functions.cpp`), and that is all. So `'#'`
-  is not this board inventing a marker - `decodeAPRS()` substitutes `'#'`
-  itself whenever the byte is `0x00` or missing entirely (the trailer
-  ending `0x7E` arrives in its place), and the encoder writes `0x23` for a
-  zero field on the way out. Sending it says exactly "no sub-version",
-  using the value every node already generates for that case, which is why
-  it cannot trip a check that does not exist and cannot be mistaken for a
-  release either. The corollary is that it does **not** identify this
-  tracker: an old node and a truncated frame decode to the same `'#'`.
+  The sub-version byte after the FCS is `SOURCE_VERSION_SUB` (`'a'` in
+  4.40a). In 4.35s nothing in the node firmware inspected it beyond
+  printing `FW:%02i:%c` and forwarding `fw_sub` over EXTUDP, so `'#'`
+  (`decodeAPRS()`'s fallback for a missing or zero byte) was sent as "not
+  stated". In 4.40a, `nbrNoteFw()` and `nbrBuildDirectInfo()` map `'a'..'z'`
+  to `1..26` in the neighbour matrix and direct-slot views, while treating
+  `'#'` as `0` (unknown). Sending `'a'` populates the full `v4.40a` version
+  in 4.40a neighbour tables and phone MHeard frames.
 - **Two hop limits, not one.** `initAPRS()` gives `:` and `@` the text
   limit and everything else the position limit, which is why real nodes
   send positions at H02 and messages and HEY at H04. `meshComHopText`
@@ -382,11 +377,11 @@ exactly that reason. Both are now verified against
   now follow upstream: node identity hashed from the callsign in the top
   22 bits, a counter seeded from `rp2040.hwrand32()` in the low 10.
 - **`meshComHardwareId=0` means "no info"**, not "unset" - it is index 0
-  of the table in `mheard_functions.cpp`. The default is 1 (TLORA_V2),
-  the closest plain SX127x node, because this board has no id of its own
-  and a station reporting 0 may not reach the map. Ids above 38 are
-  remapped by `getHardwareLong()`, which is why a T-Deck Plus reports 46
-  and displays as index 17.
+  of `nbrHwNames[]` in `src/nbr_views.cpp` (formerly `mheard_functions.cpp`).
+  The default is 1 (TLORA_V2), the closest plain SX127x node, because this
+  board has no id of its own and a station reporting 0 may not reach the
+  map. Ids 39..61 are remapped by `nbrHardwareName()`, which is why a
+  T-Deck Plus reports 46 and displays as index 17.
 - **An alert needs no GPS.** It carries no position and the MeshCom path
   needs no timestamp, so the flush sits *above* the date gate in `loop()`,
   next to the forced-metadata send. Below it the queue was unreachable
@@ -402,7 +397,7 @@ exactly that reason. Both are now verified against
   anything sent off the POSINFO interval. That reading is right about the
   encoder and wrong about what the flag *means* to the network. Track is
   a MeshCom node's declaration that its position goes out over LoRa-APRS
-  instead of over the mesh, and `loop_functions.cpp:4453` is blunt about
+  instead of over the mesh, and `loop_functions.cpp:5439` is blunt about
   it: `bSendViaAPRS = bDisplayTrack; bSendViaMesh = !bDisplayTrack;` - a
   node in track mode stops feeding the mesh almost entirely. Nothing in
   the node firmware filters on the received bit (it appears only in

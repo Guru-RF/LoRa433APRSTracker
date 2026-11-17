@@ -205,12 +205,13 @@ extern FS FatFS;
 // SF11/250 kHz, on every single frame.
 #define DEFAULT_MESHCOM_PREAMBLE   8
 // The hardware id a receiving node looks up in its own table
-// (mheard_functions.cpp getHardwareLong(): 1 TLORA_V2, 2 TLORA_V1,
-// 3 TLORA_V2_1_1p6, 4 TBEAM, 7 T_ECHO, 8 TDECK, 9 RAK4631 ... and a remap
-// for the ids above 38). This board is not in that table, so it borrows the
-// closest plain SX127x node: id 0 is literally "no info", and a station that
-// reports it is at best displayed as unknown hardware and at worst dropped
-// by the gateways on the way to the map.
+// (nbr_views.cpp nbrHardwareName(), formerly mheard_functions.cpp
+// getHardwareLong(): 1 TLORA_V2, 2 TLORA_V1, 3 TLORA_V2_1_1p6, 4 TBEAM,
+// 7 T_ECHO, 8 TDECK, 9 RAK4631 ... and a remap for the ids 39..61). This
+// board is not in that table, so it borrows the closest plain SX127x node:
+// id 0 is literally "no info", and a station that reports it is at best
+// displayed as unknown hardware and at worst dropped by the gateways on the
+// way to the map.
 #define DEFAULT_MESHCOM_HWID       1
 // Refuse to transmit at all while a computer is attached, rather than
 // dropping to usbPaDrive. For a port that cannot supply even the
