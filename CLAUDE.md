@@ -316,9 +316,9 @@ exactly that reason. Both are now verified against
   it silences the APRS free text, telemetry and `/A=` excepted, for a
   station that would rather spend those bytes.
 - **The firmware-version byte in the trailer is a protocol generation.**
-  Three receivers read it: `aprs_functions.cpp:542` discards the entire
+  Three receivers read it: `aprs_functions.cpp:533` discards the entire
   frame when it is 1..34 ("Packet discarded, wrong FW-version"), and
-  `lora_functions.cpp:1599` and `loop_functions.cpp:3606` treat `/A=` as
+  `lora_functions.cpp:1609` and `loop_functions.cpp:3695` treat `/A=` as
   feet and convert it only when it is above 13. This firmware sent its own
   2.1 as `2`, which put it inside the discard window of every current node
   and left 541 m displaying as "1775" on the older ones that still
@@ -368,6 +368,13 @@ exactly that reason. Both are now verified against
   receiving a message for someone else still decodes and logs it, so
   "it arrives as TXT but not in the mailbox" means the frame is right
   and the *destination* is not. `*` is the way to prove the path.
+  The `{NNN` ack suffix goes on callsign DMs *only* (never `*`, numeric
+  groups `1..99999` / `100001` per `CheckGroup()`, or `WLNK-1`/`APRS2SOTA`):
+  receiving nodes only strip `{NNN` before display in the
+  `destination == node_call` branch of `OnRxDone`, so putting it on `*` or
+  a group leaves `{001` visible in the chat text. Any `{` in the body of a
+  DM is replaced with `(` (matching `loop_functions.cpp:sendMessage`),
+  because the receiver finds the suffix with `mcIndexOfStrFrom(payload, "{", 1)`.
 - **The message id is a dedup key, not a counter.** A receiving node
   remembers the last MAX_DEDUP_RING ids it saw - 60..100 depending on
   the board - and drops a repeat *regardless of sender*
@@ -375,7 +382,9 @@ exactly that reason. Both are now verified against
   boot therefore had the first frames after each reflash silently
   discarded, which is most of what looked like "MeshCom is flaky". They
   now follow upstream: node identity hashed from the callsign in the top
-  22 bits, a counter seeded from `rp2040.hwrand32()` in the low 10.
+  22 bits, a counter seeded from `rp2040.hwrand32()` in the low 10,
+  running `0..999` inclusive (`kMsgIdMax = 999` in `src/msgid_counter.h`)
+  and shared with the `{NNN` DM suffix so `(msg_id & 0x3FF) == NNN`.
 - **`meshComHardwareId=0` means "no info"**, not "unset" - it is index 0
   of `nbrHwNames[]` in `src/nbr_views.cpp` (formerly `mheard_functions.cpp`).
   The default is 1 (TLORA_V2), the closest plain SX127x node, because this
@@ -397,7 +406,7 @@ exactly that reason. Both are now verified against
   anything sent off the POSINFO interval. That reading is right about the
   encoder and wrong about what the flag *means* to the network. Track is
   a MeshCom node's declaration that its position goes out over LoRa-APRS
-  instead of over the mesh, and `loop_functions.cpp:5439` is blunt about
+  instead of over the mesh, and `loop_functions.cpp:5511` is blunt about
   it: `bSendViaAPRS = bDisplayTrack; bSendViaMesh = !bDisplayTrack;` - a
   node in track mode stops feeding the mesh almost entirely. Nothing in
   the node firmware filters on the received bit (it appears only in

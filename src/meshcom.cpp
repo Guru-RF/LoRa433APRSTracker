@@ -27,13 +27,41 @@ namespace {
 // the same, with the identity hashed from the callsign so two trackers never
 // share a space, and the counter seeded per boot from the hardware RNG so a
 // restart does not replay ids that are still in a neighbour's ring.
+// Upstream's node_msgid runs 0..999 inclusive, not 0..1023 (kMsgIdMax = 999
+// in src/msgid_counter.h), because the same counter is formatted as "%03i" in
+// DM "{NNN" trailers and both places must advance in lockstep.
 static uint32_t meshComNodeId = 0;
 static uint16_t meshComCounter = 0;
 
-static uint32_t meshComNextMsgId() {
-    uint32_t id = ((meshComNodeId & 0x3FFFFFUL) << 10) | (meshComCounter & 0x3FF);
-    meshComCounter = (uint16_t)((meshComCounter + 1) & 0x3FF);
+static uint32_t meshComNextMsgId(uint16_t *outSeq = nullptr) {
+    uint16_t seq = (uint16_t)(meshComCounter % 1000);
+    if (outSeq) *outSeq = seq;
+    uint32_t id = ((meshComNodeId & 0x3FFFFFUL) << 10) | (seq & 0x3FF);
+    meshComCounter = (uint16_t)((seq + 1) % 1000);
     return id;
+}
+
+// True for the destinations upstream does not treat as a callsign DM in
+// loop_functions.cpp:sendMessage() - "*" (Messages to All), the two APRS
+// gateway service calls, or a numeric group number (1..99999 or 100001,
+// CheckGroup() in aprs_functions.cpp). A frame to any of these goes out
+// without a "{NNN" trailer: receiving nodes only strip "{NNN" before display
+// in the `destination == node_call` branch of OnRxDone, so a trailer on "*"
+// or a group is displayed literally at the end of the message text.
+static bool meshComIsBroadcastOrGroup(const char *target) {
+    if (!target || !target[0]) return false;
+    if (strcmp(target, "*") == 0 ||
+        strcmp(target, "WLNK-1") == 0 ||
+        strcmp(target, "APRS2SOTA") == 0) {
+        return true;
+    }
+    size_t len = strlen(target);
+    if (len < 1 || len > 6) return false;
+    for (size_t i = 0; i < len; i++) {
+        if (target[i] < '0' || target[i] > '9') return false;
+    }
+    int ig = atoi(target);
+    return ig == 100001 || (ig >= 1 && ig <= 99999);
 }
 
 // The modulation byte is two nibbles, not one: upstream builds it as
@@ -177,13 +205,12 @@ static bool meshComPayload(char *out, size_t outLen, const TrackerConfig &cfg,
 // (extras/decode_meshcom.py). The FCS is a plain byte sum over everything
 // ahead of it, high byte first - that decoder swaps the halves before
 // comparing, which is the same thing said backwards.
-static size_t meshComFrame(uint8_t *frame, size_t frameLen,
-                           const TrackerConfig &cfg, uint8_t dti,
-                           const char *aprs) {
+static size_t meshComFrameWithId(uint8_t *frame, size_t frameLen,
+                                 const TrackerConfig &cfg, uint8_t dti,
+                                 uint32_t msgId, const char *aprs) {
     size_t n = 0;
 
     frame[n++] = dti;
-    uint32_t msgId = meshComNextMsgId();
     frame[n++] = (uint8_t)(msgId & 0xFF);
     frame[n++] = (uint8_t)((msgId >> 8) & 0xFF);
     frame[n++] = (uint8_t)((msgId >> 16) & 0xFF);
@@ -218,10 +245,10 @@ static size_t meshComFrame(uint8_t *frame, size_t frameLen,
     // The firmware-version byte is a protocol generation, not a product
     // label, and three receivers read it rather than print it:
     //
-    //   aprs_functions.cpp:542  1..34 -> the whole frame is discarded,
+    //   aprs_functions.cpp:533  1..34 -> the whole frame is discarded,
     //                           "Packet discarded, wrong FW-version"
-    //   lora_functions.cpp:1599 >13   -> /A= is treated as feet and
-    //   loop_functions.cpp:3606          converted to metres for display
+    //   lora_functions.cpp:1609 >13   -> /A= is treated as feet and
+    //   loop_functions.cpp:3695          converted to metres for display
     //
     // Sending this board's own 2.1 as "2" therefore put it in the discard
     // window of every current node, and left the altitude unconverted on
@@ -238,6 +265,12 @@ static size_t meshComFrame(uint8_t *frame, size_t frameLen,
     frame[n++] = 'a';
     frame[n++] = 0x7E;
     return n;
+}
+
+static size_t meshComFrame(uint8_t *frame, size_t frameLen,
+                           const TrackerConfig &cfg, uint8_t dti,
+                           const char *aprs) {
+    return meshComFrameWithId(frame, frameLen, cfg, dti, meshComNextMsgId(), aprs);
 }
 
 // Retune, key up, and come back to APRS. Leaving the radio on the MeshCom
@@ -267,7 +300,7 @@ void MeshCom::begin(const char *callsign, uint16_t seed) {
         h *= 16777619UL;
     }
     meshComNodeId = h & 0x3FFFFFUL;
-    meshComCounter = (uint16_t)(seed & 0x3FF);
+    meshComCounter = (uint16_t)(seed % 1000);
 }
 
 bool MeshCom::sendPosition(const TrackerConfig &cfg, const char *callsign,
@@ -310,30 +343,55 @@ bool MeshCom::sendHey(const TrackerConfig &cfg, const char *callsign,
     return meshComTransmit(cfg, frame, n, drive);
 }
 
-// A private message. The wire shape is the same frame with ':' as the data
+// A text message. The wire shape is the same frame with ':' as the data
 // type identifier and SOURCE>TARGET: ahead of the text - the upstream
 // decoder splits on '>' and then on the DTI character itself, so the colon
 // after the target is structural rather than decoration.
 //
-// The trailing {NNN is MeshCom's ack request. This tracker cannot receive,
-// so no ack will ever arrive; it is sent anyway because a node that gets a
-// message without one treats it as an ack-less broadcast and some clients
-// then decline to show it in the message list.
+// Upstream (loop_functions.cpp:sendMessage) attaches "{NNN" ONLY to a
+// callsign DM (not "*", not a numeric group id 1..99999 / 100001, not
+// WLNK-1/APRS2SOTA), where NNN is the same 0..999 counter encoded in the
+// low 10 bits of msg_id, and replaces any '{' inside the DM text with '('
+// so the receiver's indexOf("{", 1) finds the ack trailer rather than a
+// brace in the body. On "*" or a group, receiving nodes do not strip
+// "{NNN" before display, so appending it there would leave "{001" visible
+// in the chat text.
 bool MeshCom::sendMessage(const TrackerConfig &cfg, const char *callsign,
                           const char *target, const char *text, int8_t drive) {
     if (!callsign || !callsign[0]) return false;
     if (!target || !target[0]) return false;
     if (!text || !text[0]) return false;
+    if (strcasecmp(callsign, target) == 0) return false;  // upstream refuses a DM to own-call
 
-    static uint16_t ackCounter = 1;
+    uint16_t seq = 0;
+    uint32_t msgId = meshComNextMsgId(&seq);
+    const bool isDm = !meshComIsBroadcastOrGroup(target);
 
-    char aprs[190];
-    snprintf(aprs, sizeof(aprs), "%s>%s:%s{%03u", callsign, target, text,
-             (unsigned)(ackCounter % 1000));
-    ackCounter++;
+    // Upstream caps message text at 160 characters (loop_functions.cpp:4709);
+    // capping clean at 160 also guarantees "%s>%s:%s{%03u" fits in aprs[208]
+    // without ever truncating the "{NNN" trailer.
+    char clean[161];
+    size_t tp = 0;
+    for (const char *p = text; *p && tp < sizeof(clean) - 1; p++) {
+        char c = *p;
+        if (isDm && c == '{') c = '(';
+        clean[tp++] = c;
+    }
+    clean[tp] = '\0';
+
+    char aprs[208];
+    int written;
+    if (isDm) {
+        written = snprintf(aprs, sizeof(aprs), "%s>%s:%s{%03u", callsign,
+                           target, clean, (unsigned)seq);
+    } else {
+        written = snprintf(aprs, sizeof(aprs), "%s>%s:%s", callsign, target,
+                           clean);
+    }
+    if (written < 0 || (size_t)written >= sizeof(aprs)) return false;
 
     uint8_t frame[255];
-    size_t n = meshComFrame(frame, sizeof(frame), cfg, 0x3A, aprs);
+    size_t n = meshComFrameWithId(frame, sizeof(frame), cfg, 0x3A, msgId, aprs);
     if (!n) return false;
     return meshComTransmit(cfg, frame, n, drive);
 }
