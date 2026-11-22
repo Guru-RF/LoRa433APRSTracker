@@ -28,8 +28,8 @@ namespace {
 // share a space, and the counter seeded per boot from the hardware RNG so a
 // restart does not replay ids that are still in a neighbour's ring.
 // Upstream's node_msgid runs 0..999 inclusive, not 0..1023 (kMsgIdMax = 999
-// in src/msgid_counter.h), because the same counter is formatted as "%03i" in
-// DM "{NNN" trailers and both places must advance in lockstep.
+// in upstream src/msgid_counter.h), because the same counter is formatted as
+// "%03i" in DM "{NNN" trailers and both places must advance in lockstep.
 static uint32_t meshComNodeId = 0;
 static uint16_t meshComCounter = 0;
 
@@ -51,8 +51,8 @@ static uint32_t meshComNextMsgId(uint16_t *outSeq = nullptr) {
 static bool meshComIsBroadcastOrGroup(const char *target) {
     if (!target || !target[0]) return false;
     if (strcmp(target, "*") == 0 ||
-        strcmp(target, "WLNK-1") == 0 ||
-        strcmp(target, "APRS2SOTA") == 0) {
+        strcasecmp(target, "WLNK-1") == 0 ||
+        strcasecmp(target, "APRS2SOTA") == 0) {
         return true;
     }
     size_t len = strlen(target);
@@ -169,8 +169,21 @@ static bool meshComPayload(char *out, size_t outLen, const TrackerConfig &cfg,
     if (ip > 25) ip = 25;               // upstream's cap on this field
     info[ip] = '\0';
 
-    if (cfg.meshComName[0]) {
-        snprintf(info + ip, sizeof(info) - ip, "#%s", cfg.meshComName);
+    // Upstream 4.40a decodeAPRSPOS() reads comment+name up to the first '/'
+    // tag and splits on the last '#'; upstream --setname strips '#'. Strip '#'
+    // and APRS/telemetry delimiters so a configured name can never shift the
+    // comment/name split or inject a '/X=' tag ahead of '/B=' or '/A='.
+    char name[sizeof(cfg.meshComName)];
+    size_t np = 0;
+    for (const char *p = cfg.meshComName; *p && np < sizeof(name) - 1; p++) {
+        const char c = *p;
+        if (c == '#' || c == '{' || c == '}' || c == ':' || c == ';' || c == ',' || c == '/') continue;
+        if ((unsigned char)c < 0x20 || c == 0x7F) continue;
+        name[np++] = c;
+    }
+    name[np] = '\0';
+    if (np) {
+        snprintf(info + ip, sizeof(info) - ip, "#%s", name);
     }
 
     // Battery ahead of altitude, in the order the rest of the mesh sends
@@ -255,11 +268,11 @@ static size_t meshComFrameWithId(uint8_t *frame, size_t frameLen,
     // the ones old enough to accept it - 541 m arriving as "1775 m", which
     // is the sort of implausibility a map has every reason to drop.
     //
-    // In 4.40a, nbrNoteFw() and nbrBuildDirectInfo() also record both the
-    // version (40 = 4.40) and the sub-version letter ('a'..'z' -> 1..26) in
-    // the neighbour matrix for MHeard, Path and phone views, treating '#'
-    // as unknown. So the trailer carries 40 and 'a' to match current
-    // 4.40a nodes on the air.
+    // In 4.40a, nbrNoteFw() and nbrNoteDirect() (upstream src/nbr_matrix.cpp)
+    // record the version (40 = 4.40) and map the sub-version letter
+    // ('a'..'z' -> 1..26, '#' -> 0 unknown), while nbrBuildDirectInfo() passes
+    // the raw sub-version byte for direct frames so WebUI MHeard and Path
+    // views display v4.40a. Carry 40 and 'a' to match current 4.40a nodes.
     frame[n++] = 40;
     frame[n++] = (uint8_t)(0x80 | hw);
     frame[n++] = 'a';
@@ -367,9 +380,10 @@ bool MeshCom::sendMessage(const TrackerConfig &cfg, const char *callsign,
     uint32_t msgId = meshComNextMsgId(&seq);
     const bool isDm = !meshComIsBroadcastOrGroup(target);
 
-    // Upstream caps message text at 160 characters (loop_functions.cpp:4709);
-    // capping clean at 160 also guarantees "%s>%s:%s{%03u" fits in aprs[208]
-    // without ever truncating the "{NNN" trailer.
+    // Mirrors upstream's 160-byte message input cap (loop_functions.cpp:4712;
+    // upstream rejects longer inputs, here we truncate the body) and also
+    // guarantees "%s>%s:%s{%03u" fits in aprs[208] without ever truncating
+    // the "{NNN" trailer.
     char clean[161];
     size_t tp = 0;
     for (const char *p = text; *p && tp < sizeof(clean) - 1; p++) {

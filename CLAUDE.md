@@ -329,20 +329,21 @@ exactly that reason. Both are now verified against
   What 40 *says* is "4.40": `shortVERSION()` is
   `memcpy(cfw, SOURCE_VERSION+2, 2)` over `SOURCE_VERSION "4.40"`, so the
   byte is only the part after the dot and the major version is never
-  transmitted at all. The discard floor remains `< 35`, and in 4.40a
-  `nbrNoteFw()` (`src/nbr_matrix.cpp`) also records this byte in the
-  neighbour matrix and displays it as `v4.%02u%c` on the WebUI MHeard and
-  Path pages. It has to be raised in step with upstream whenever
-  `SOURCE_VERSION` moves.
+  transmitted at all. The discard window remains `1..34` (`> 0 && < 35`;
+  `0` is allowed), and in 4.40a `nbrNoteFw()` (upstream `src/nbr_matrix.cpp`)
+  also records this byte in the neighbour matrix and displays it as
+  `v4.%02u%c` on the WebUI MHeard and Path pages. It has to be raised in
+  step with upstream whenever `SOURCE_VERSION` moves.
 
   The sub-version byte after the FCS is `SOURCE_VERSION_SUB` (`'a'` in
   4.40a). In 4.35s nothing in the node firmware inspected it beyond
   printing `FW:%02i:%c` and forwarding `fw_sub` over EXTUDP, so `'#'`
   (`decodeAPRS()`'s fallback for a missing or zero byte) was sent as "not
-  stated". In 4.40a, `nbrNoteFw()` and `nbrBuildDirectInfo()` map `'a'..'z'`
-  to `1..26` in the neighbour matrix and direct-slot views, while treating
-  `'#'` as `0` (unknown). Sending `'a'` populates the full `v4.40a` version
-  in 4.40a neighbour tables and phone MHeard frames.
+  stated". In 4.40a, `nbrNoteFw()` and `nbrNoteDirect()` (upstream
+  `src/nbr_matrix.cpp`) map `'a'..'z'` to `1..26` while treating `'#'` as
+  `0` (unknown), and `nbrBuildDirectInfo()` passes the raw sub-version
+  letter for direct frames. Sending `'a'` populates the full `v4.40a`
+  version in 4.40a neighbour tables and WebUI MHeard/Path views.
 - **Two hop limits, not one.** `initAPRS()` gives `:` and `@` the text
   limit and everything else the position limit, which is why real nodes
   send positions at H02 and messages and HEY at H04. `meshComHopText`
@@ -383,10 +384,12 @@ exactly that reason. Both are now verified against
   discarded, which is most of what looked like "MeshCom is flaky". They
   now follow upstream: node identity hashed from the callsign in the top
   22 bits, a counter seeded from `rp2040.hwrand32()` in the low 10,
-  running `0..999` inclusive (`kMsgIdMax = 999` in `src/msgid_counter.h`)
-  and shared with the `{NNN` DM suffix so `(msg_id & 0x3FF) == NNN`.
+  running `0..999` inclusive (`kMsgIdMax = 999` in upstream
+  `src/msgid_counter.h`) and shared with the `{NNN` DM suffix so
+  `(msg_id & 0x3FF) == NNN`.
 - **`meshComHardwareId=0` means "no info"**, not "unset" - it is index 0
-  of `nbrHwNames[]` in `src/nbr_views.cpp` (formerly `mheard_functions.cpp`).
+  of `nbrHwNames[]` in upstream `src/nbr_views.cpp` (formerly
+  `mheard_functions.cpp`).
   The default is 1 (TLORA_V2), the closest plain SX127x node, because this
   board has no id of its own and a station reporting 0 may not reach the
   map. Ids 39..61 are remapped by `nbrHardwareName()`, which is why a

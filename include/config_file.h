@@ -205,7 +205,7 @@ extern FS FatFS;
 // SF11/250 kHz, on every single frame.
 #define DEFAULT_MESHCOM_PREAMBLE   8
 // The hardware id a receiving node looks up in its own table
-// (nbr_views.cpp nbrHardwareName(), formerly mheard_functions.cpp
+// (upstream src/nbr_views.cpp nbrHardwareName(), formerly mheard_functions.cpp
 // getHardwareLong(): 1 TLORA_V2, 2 TLORA_V1, 3 TLORA_V2_1_1p6, 4 TBEAM,
 // 7 T_ECHO, 8 TDECK, 9 RAK4631 ... and a remap for the ids 39..61). This
 // board is not in that table, so it borrows the closest plain SX127x node:
