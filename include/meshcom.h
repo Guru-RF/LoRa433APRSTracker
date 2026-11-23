@@ -27,8 +27,8 @@ bool sendPosition(const TrackerConfig &cfg, const char *callsign,
 // collects a signal report from every node that relays it.
 bool sendHey(const TrackerConfig &cfg, const char *callsign, int8_t drive);
 
-// Build and transmit one MeshCom private message to a target callsign.
-// Same retune, same return to APRS.
+// Build and transmit one MeshCom text message to a target callsign, numeric
+// group, "*", or gateway service call. Same retune, same return to APRS.
 bool sendMessage(const TrackerConfig &cfg, const char *callsign,
                  const char *target, const char *text, int8_t drive);
 

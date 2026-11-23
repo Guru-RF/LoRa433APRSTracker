@@ -204,9 +204,14 @@ the firmware sends what it always has unless you change it:
   the gap to a few minutes at speed, which is when airtime is scarcest.
   `off` removes the free text from every beacon including the first; the
   telemetry and `/A=` in the same field are unaffected, since they are not
-  the comment. A station running MeshCom as well can leave `comment=` set
-  and silence only the APRS side that way - the MeshCom position picks the
-  same text up and prefixes it, so the description still reaches the map.
+  the comment. Note that when **MeshCom** is also enabled, both paths reach
+  APRS-IS under the same `callsign`: every MeshCom position carries
+  `meshComComment#meshComName`, whereas LoRa-APRS only sends `comment`
+  every `commentInterval` seconds. With `commentInterval=1800` (and
+  especially `meshComInterval=smart`, which sends right after each APRS
+  beacon), aprs.fi will mostly show the MeshCom text as the station's last
+  comment. Set `commentInterval=always` if you want every LoRa-APRS
+  position to carry your APRS `comment` alongside the path difference.
 
 Altitude is free while stationary. The compressed position's `cs` field
 carries either course/speed or altitude, and APRS 1.0.1 (chapter 9) says
@@ -250,12 +255,14 @@ and an advert has no room for it either.
   default `4`). MeshCom splits the two; positions travel less far than text.
 - **meshComName** - station name, sent as `#name` at the end of the
   position's free text. Every node on the mesh carries one, and a node with
-  no comment still sends `#name`, so this is the field that matters.
-- **meshComComment** - free text ahead of the name, 25 characters. `{ } : ;
-  , /` are dropped because MeshCom's own parsers read them as delimiters,
-  and a space ends the field at the receiver - write `Meshcom-Region`,
-  not `Meshcom Region`. `Meshcom-` is prefixed automatically unless the
-  text is sent exactly as written, and an empty setting falls back to plain
+  no comment still sends `#name`, so this is the field that matters. `#`
+  and APRS/telemetry delimiters (`{ } : ; , /`) are stripped so the name
+  cannot shift 4.40a's last-`#` comment/name split or inject a `/X=` tag.
+- **meshComComment** - free text ahead of the name, up to 25 characters.
+  `{ } : ; , /` are dropped because MeshCom's own parsers read them as
+  delimiters, and pre-4.40 nodes end the field at the first space - write
+  `Meshcom-Region`, not `Meshcom Region`. A configured comment is sent
+  verbatim (no automatic prefix), and an empty setting falls back to plain
   `Meshcom`. Both paths reach APRS-IS under the same callsign, so this is
   the only thing on the map that says which one a position came through -
   which is why the fallback names the network, and why nothing is prefixed
